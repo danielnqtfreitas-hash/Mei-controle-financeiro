@@ -61,6 +61,7 @@
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <h1 class="text-2xl font-bold neon-text">MEI Controle</h1>
             <div id="auth-status" class="text-xs mt-2 sm:mt-0 opacity-70">
+                <!-- AVISO: O ID ABAIXO É A CHAVE DE ACESSO AOS DADOS. NÃO MUDE MANUALMENTE. -->
                 <p id="user-id-display">ID do Usuário: Carregando...</p>
             </div>
         </div>
@@ -131,26 +132,19 @@
         // =================================================================
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         // Importa apenas o necessário (Auth e Firestore)
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, query, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- CONFIGURAÇÃO INICIAL E VARIÁVEIS GLOBAIS ---
         
         // =================================================================
-        // CONFIGURAÇÃO DO FIREBASE (FORNECIDA PELO USUÁRIO)
+        // CONFIGURAÇÃO DO FIREBASE: USANDO VARIÁVEIS GLOBAIS DO CANVAS
+        // Isso garante que o app funcione no modo de usuário único/sem login
         // =================================================================
-        const firebaseConfig = {
-            apiKey: "AIzaSyBI7Zecb-2tn3zUAAhiO5UmtTGcAALUiKg",
-            authDomain: "vitrine-913c6.firebaseapp.com",
-            projectId: "vitrine-913c6",
-            storageBucket: "vitrine-913c6.firebasestorage.app",
-            messagingSenderId: "1088927815489",
-            appId: "1:1088927815489:web:61d745609fbf4c8b9e73c0",
-            // measurementId: "G-ZLNVWY16CJ" // Removido por não ser essencial para o funcionamento do app
-        };
-        // O ID do aplicativo é apenas um namespace para o path do Firestore
-        const APP_NAMESPACE = "mei_controle_app";
-        
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
         let app, db, auth;
         let userId = null;
         let isAuthReady = false;
@@ -179,13 +173,12 @@
 
         // --- UTILITIES E HELPERS ---
 
-        // FUNÇÃO CRÍTICA: Define o caminho da coleção privada no seu Firebase externo
+        // FUNÇÃO CRÍTICA AJUSTADA: Define o caminho da coleção privada no Canvas Firestore
         const getCollectionPath = (collectionName) => {
             if (!userId) return null;
-            // Caminho Universal: {APP_NAMESPACE}_users/{userId}/{collectionName}
-            // OBS: Certifique-se de que suas Regras de Segurança do Firestore permitam o acesso
-            // Exemplo de path: mei_controle_app_users/USER_ID_AQUI/faturamento
-            return `${APP_NAMESPACE}_users/${userId}/${collectionName}`;
+            // O caminho OBRIGATÓRIO para dados privados no Canvas é:
+            // artifacts/{appId}/users/{userId}/{collectionName}
+            return `artifacts/${appId}/users/${userId}/${collectionName}`;
         };
 
         const formatCurrency = (amount) => {
@@ -223,7 +216,9 @@
                     if (!dateString) return false;
                     
                     const date = new Date(dateString);
-                    return date.getFullYear() === year && (date.getMonth() + 1) === month;
+                    // Adiciona um dia à data para evitar problemas de fuso horário na virada do dia
+                    const safeDate = new Date(date.getTime() + (24 * 60 * 60 * 1000));
+                    return safeDate.getFullYear() === year && (safeDate.getMonth() + 1) === month;
                 });
             }
             if (search) {
@@ -234,6 +229,7 @@
                     )
                 );
             }
+            // Ordena pela data mais recente primeiro
             filtered.sort((a, b) => new Date(b.data || b.pagoEm || 0) - new Date(a.data || a.pagoEm || 0));
             return filtered;
         };
@@ -242,34 +238,41 @@
 
         const initializeFirebase = async () => {
             try {
+                // 1. Inicializa o App
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Tenta fazer login anonimamente.
-                // Em uma aplicação real, você deve implementar login/cadastro com email/senha ou Google.
-                await signInAnonymously(auth);
+                // 2. Tenta Autenticar
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // MODO USUÁRIO ÚNICO: Entra anonimamente para obter um UID, sem exigir login
+                    await signInAnonymously(auth);
+                }
 
-                // Listener para o estado de autenticação (CRÍTICO)
+                // 3. Listener para o estado de autenticação (CRÍTICO)
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
-                        userIdDisplay.textContent = `ID do Usuário: ${userId}`;
+                        // Exibimos o ID para depuração (MANDATÓRIO no Canvas)
+                        userIdDisplay.textContent = `ID de Sessão: ${userId}`; 
                         isAuthReady = true;
                         setupFirestoreListeners(); // Inicia a escuta de dados após o login
                         render(state.activeTab);
                     } else {
-                        // Se o login anônimo falhar ou houver logoff
                         userId = null;
-                        userIdDisplay.textContent = 'Por favor, autentique-se para ver os dados.';
+                        userIdDisplay.textContent = 'Autenticação Anônima Falhou.';
                         isAuthReady = true;
-                        // Opcional: Renderizar uma tela de "Não Logado"
+                        // O app fica sem funcionalidade de salvar/carregar se a autenticação falhar
+                        showToast('Falha na conexão com o Firestore. Tente recarregar.', 'error');
                     }
                 });
 
             } catch (error) {
                 console.error("Erro na inicialização do Firebase:", error);
-                userIdDisplay.textContent = `Erro de Inicialização: ${error.message}. Verifique o console e a Configuração!`;
+                userIdDisplay.textContent = `Erro de Inicialização: ${error.message}`;
+                showToast(`Erro Crítico: ${error.message}`, 'error');
             }
         };
 
@@ -279,7 +282,7 @@
                 console.warn("Firestore ou User ID não estão prontos.");
                 return;
             }
-
+            
             // Faturamento
             onSnapshot(collection(db, getCollectionPath('faturamento')), (snapshot) => {
                 state.faturamento = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -412,7 +415,7 @@
         
         // --- RENDERIZAÇÃO DE FORMULÁRIOS (HTML retornado) ---
 
-        const getInputClasses = () => 'p-3 rounded-lg bg-var(--dark-input) border border-[#333] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm w-full';
+        const getInputClasses = () => 'p-3 rounded-lg bg-[#2a2a2a] border border-[#333] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm w-full';
         
         const getSubmitButton = (label, icon) => `
             <button type="submit" class="w-full mt-6 px-6 py-3 bg-[#00ff88] text-lg text-black font-bold rounded-xl hover:bg-opacity-90 transition active:scale-95 neon-glow touch-action-manipulation">
@@ -441,6 +444,7 @@
                         <option value="Pix">Pix</option>
                         <option value="Dinheiro">Dinheiro</option>
                         <option value="Boleto">Boleto</option>
+                        <option value="Outro">Outro</option>
                     </select>
                 </div>
                 <div>
@@ -468,6 +472,7 @@
                         <option value="Serviços">Serviços</option>
                         <option value="Marketing">Marketing</option>
                         <option value="Impostos">Impostos (Gerais)</option>
+                        <option value="Contabilidade">Contabilidade</option>
                         <option value="Outros">Outros</option>
                     </select>
                 </div>
@@ -482,6 +487,8 @@
                         <option value="Pix">Pix</option>
                         <option value="Dinheiro">Dinheiro</option>
                         <option value="Boleto">Boleto</option>
+                        <option value="Transferência">Transferência</option>
+                        <option value="Outro">Outro</option>
                     </select>
                 </div>
                 <div>
@@ -576,7 +583,8 @@
                 total: total,
             };
             
-            const existingItem = state.estoque.find(i => i.item.toLowerCase() === newItem.item.toLowerCase());
+            // Tenta encontrar item existente pelo nome
+            const existingItem = state.estoque.find(i => i.item && i.item.toLowerCase() === newItem.item.toLowerCase());
             saveDocument('estoque', newItem, existingItem ? existingItem.id : null);
         };
 
@@ -595,23 +603,20 @@
         // --- RENDERIZAÇÃO DE TABELAS REUTILIZÁVEIS ---
 
         const renderControls = (collectionName) => {
-            const date = new Date();
-            const currentMonthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-            
             return `
                 <div class="flex flex-col sm:flex-row gap-4 mb-6 card p-4 rounded-xl border border-[#333]">
                     <!-- Busca Rápida -->
                     <div class="flex-grow">
                         <label for="${collectionName}-search" class="block text-sm font-medium text-gray-400 mb-1">Busca Rápida</label>
                         <input type="text" id="${collectionName}-search" placeholder="Buscar por descrição, cliente, etc." 
-                               class="w-full p-2.5 rounded-lg bg-var(--dark-input) border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                               class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
                                oninput="handleSearchFilter('${collectionName}')">
                     </div>
                     <!-- Filtro por Mês/Ano -->
                     <div class="w-full sm:w-auto">
                         <label for="${collectionName}-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar por Mês/Ano</label>
                         <input type="month" id="${collectionName}-month-year" value=""
-                               class="w-full p-2.5 rounded-lg bg-var(--dark-input) border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                               class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
                                onchange="handleSearchFilter('${collectionName}')">
                         <button onclick="clearMonthFilter('${collectionName}')" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Filtro</button>
                     </div>
@@ -636,7 +641,8 @@
                 const cellHTML = dataKeys.map(key => {
                     let value = item[key];
                     if (key.endsWith('data') || key.endsWith('Data') || key.endsWith('pagoEm')) {
-                        value = item[key] ? new Date(item[key]).toLocaleDateString('pt-BR') : '-';
+                        // Converte a string de data (YYYY-MM-DD) para o formato brasileiro
+                        value = item[key] ? new Date(item[key] + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
                     } else if (valueColumns.includes(key)) {
                         value = formatCurrency(parseFloat(value || 0));
                     }
@@ -653,7 +659,7 @@
                     </td>
                 `;
 
-                return `<tr>${cellHTML}${actionsHTML}</tr>`;
+                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${actionsHTML}</tr>`;
             }).join('');
             
             let totalRowHTML = '';
@@ -776,9 +782,13 @@
         
         const calculateKPIs = () => {
             const faturamentoTotal = state.faturamento.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-            const despesasTotal = state.despesas.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0) + state.faturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
-            const lucroLiquido = faturamentoTotal - despesasTotal;
-            return { faturamentoTotal, despesasTotal, lucroLiquido };
+            const despesasOperacionais = state.despesas.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+            const custosFaturamento = state.faturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
+            
+            const despesasTotais = despesasOperacionais + custosFaturamento;
+            const lucroLiquido = faturamentoTotal - despesasTotais;
+            
+            return { faturamentoTotal, despesasTotais, lucroLiquido };
         };
 
         let chartInstance = null;
@@ -791,7 +801,7 @@
             const aggregated = {};
 
             const getGroupKey = (dateStr) => {
-                const date = new Date(dateStr);
+                const date = new Date(dateStr + 'T00:00:00'); // Adiciona T00:00:00 para evitar fuso horário
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
                 const day = String(date.getDate()).padStart(2, '0');
@@ -800,6 +810,7 @@
                 return `${year}-${month}-${day}`;
             };
             
+            // Faturamento e seus custos
             state.faturamento.forEach(item => {
                 const key = getGroupKey(item.data);
                 if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0 };
@@ -807,6 +818,7 @@
                 aggregated[key].despesas += parseFloat(item.custo || 0); // Custos de faturamento
             });
 
+            // Despesas Operacionais
             state.despesas.forEach(item => {
                 const key = getGroupKey(item.data);
                 if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0 };
@@ -817,7 +829,7 @@
 
             const labels = sortedKeys.map(key => {
                 if (granularity === 'year') return key;
-                if (granularity === 'month') return new Date(key).toLocaleDateString('pt-BR', { year: 'numeric', month: 'short' });
+                if (granularity === 'month') return new Date(key + '-01').toLocaleDateString('pt-BR', { year: 'numeric', month: 'short' });
                 return new Date(key).toLocaleDateString('pt-BR');
             });
             
@@ -884,7 +896,7 @@
 
         const renderDashboard = () => {
             const tabEl = document.getElementById('dashboard');
-            const { faturamentoTotal, despesasTotal, lucroLiquido } = calculateKPIs();
+            const { faturamentoTotal, despesasTotais, lucroLiquido } = calculateKPIs();
             const profitNeon = lucroLiquido >= 0 ? 'neon-text' : 'text-red-500';
 
             const granularityOptions = [
@@ -904,7 +916,7 @@
                     </div>
                     <div class="card p-6 rounded-xl shadow-lg border-b-4 border-red-500">
                         <p class="text-sm uppercase text-gray-400 font-medium">Despesas Totais</p>
-                        <p class="text-3xl font-bold mt-2 text-red-500">${formatCurrency(despesasTotal)}</p>
+                        <p class="text-3xl font-bold mt-2 text-red-500">${formatCurrency(despesasTotais)}</p>
                     </div>
                     <div class="card p-6 rounded-xl shadow-lg border-b-4 ${lucroLiquido >= 0 ? 'border-[#00ff88]' : 'border-red-500'}">
                         <p class="text-sm uppercase text-gray-400 font-medium">Lucro Líquido</p>
@@ -980,6 +992,9 @@
             window.handleSearchFilter = handleSearchFilter;
             window.clearMonthFilter = clearMonthFilter;
             window.changeGranularity = changeGranularity;
+            // Garante que o modal de exclusão funcione
+            window.deleteDocument = deleteDocument; 
+            window.closeModal = closeModal;
         };
 
         const handleSearchFilter = (collectionName) => {
@@ -987,8 +1002,8 @@
             const containerEl = document.getElementById(containerId);
             if (!containerEl) return;
 
-            const search = document.getElementById(`${collectionName}-search`).value;
-            const monthYear = document.getElementById(`${collectionName}-month-year`).value;
+            const search = document.getElementById(`${collectionName}-search`)?.value;
+            const monthYear = document.getElementById(`${collectionName}-month-year`)?.value;
             
             const data = state[collectionName];
             
@@ -1014,7 +1029,8 @@
         };
 
         const clearMonthFilter = (collectionName) => {
-            document.getElementById(`${collectionName}-month-year`).value = '';
+            const monthYearInput = document.getElementById(`${collectionName}-month-year`);
+            if (monthYearInput) monthYearInput.value = '';
             handleSearchFilter(collectionName);
         };
         
@@ -1028,6 +1044,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             initializeFirebase();
             setupEventListeners();
+            // Começa na aba Dashboard para mostrar o resumo inicial
+            render('dashboard'); 
         });
 
     </script>
