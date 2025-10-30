@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MEI Controle - Painel Financeiro Compartilhado</title>
+    <title>MEI Controle Financeiro</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js CDN for Analytics -->
@@ -62,6 +62,19 @@
             color: #7f5cff; /* Roxo */
             text-shadow: 0 0 5px rgba(127, 92, 255, 0.4);
         }
+         /* Estilos para a área de upload */
+        .drop-area {
+            border: 3px dashed #3b82f6;
+            background-color: #121212;
+            transition: all 0.2s;
+        }
+        .drop-area.dragover {
+            border-color: var(--neon-green);
+            background-color: #1a1a1a;
+        }
+        .file-card {
+            background-color: #2a2a2a;
+        }
     </style>
 </head>
 <body class="min-h-screen antialiased">
@@ -91,6 +104,9 @@
             <button data-tab="notasemitidas" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
                 <i class="ph-bold ph-receipt mr-2"></i>Notas Emitidas
             </button>
+            <button data-tab="comprovantes" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-file-text-fill mr-2"></i>Comprovantes
+            </button>
             <button data-tab="estoque" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
                 <i class="ph-bold ph-box mr-2"></i>Estoque
             </button>
@@ -111,6 +127,7 @@
             <div id="despesas" class="tab-content" style="display: none;"></div>
             <div id="prolabore" class="tab-content" style="display: none;"></div>
             <div id="notasemitidas" class="tab-content" style="display: none;"></div>
+            <div id="comprovantes" class="tab-content" style="display: none;"></div>
             <div id="estoque" class="tab-content" style="display: none;"></div>
             <div id="das" class="tab-content" style="display: none;"></div>
             <div id="dashboard" class="tab-content" style="display: none;"></div>
@@ -148,7 +165,10 @@
         // FIREBASE IMPORTS
         // =================================================================
         import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // NOVO: Firebase Storage Imports
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // --- CONFIGURAÇÃO INICIAL E VARIÁVEIS GLOBAIS ---
         
@@ -158,8 +178,10 @@
         
         const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : null;
         const canvasFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         const fallbackFirebaseConfig = {
+            // Configurações de fallback... (mantidas para garantir a execução)
             apiKey: "AIzaSyBI7Zecb-2tn3zUAAhiO5UmtTGcAALUiKg",
             authDomain: "vitrine-913c6.firebaseapp.com",
             projectId: "vitrine-913c6",
@@ -171,7 +193,8 @@
         const firebaseConfig = canvasFirebaseConfig || fallbackFirebaseConfig;
         const appId = canvasAppId || firebaseConfig.projectId; 
         
-        let app, db;
+        let app, db, auth, storage; // NOVO: 'storage'
+        let userId = null; // NOVO: para uso no Storage
         const isAppReady = true; 
         
         // Estado da Aplicação (Dados e UI)
@@ -180,6 +203,7 @@
             despesas: [],
             prolabore: [], 
             notasemitidas: [],
+            comprovantes: [], // NOVO: Coleção de comprovantes
             estoque: [],
             das: [],
             activeTab: 'faturamento',
@@ -209,8 +233,8 @@
         };
 
         const showToast = (message, type = 'success') => {
-            const colors = type === 'success' ? 'bg-green-600' : 'bg-red-600';
-            const icon = type === 'success' ? 'ph-check-circle' : 'ph-x-circle';
+            const colors = type === 'success' ? 'bg-green-600' : (type === 'error' ? 'bg-red-600' : 'bg-blue-600');
+            const icon = type === 'success' ? 'ph-check-circle' : (type === 'error' ? 'ph-x-circle' : 'ph-info');
             
             const toast = document.createElement('div');
             toast.className = `p-3 mb-2 rounded-lg shadow-xl text-white ${colors} transition-all duration-300 transform translate-y-full opacity-0`;
@@ -230,9 +254,7 @@
             }, 5000);
         };
 
-        // FUNÇÃO CORRIGIDA: Garante que o input seja um array e o retorno também.
         const filterDataByMonthYear = (data, dateKey, monthYearFilter) => {
-            // Garante que 'data' é um array. Se for null/undefined/não-array, usa array vazio.
             const safeData = Array.isArray(data) ? data : []; 
             
             if (!monthYearFilter) return safeData;
@@ -244,6 +266,7 @@
                 if (!dateString) return false;
                 
                 const date = new Date(dateString);
+                // Ajusta a data para evitar problemas de fuso horário com 'YYYY-MM-DD'
                 const safeDate = new Date(date.getTime() + (24 * 60 * 60 * 1000));
                 return safeDate.getFullYear() === year && (safeDate.getMonth() + 1) === month;
             });
@@ -251,7 +274,6 @@
 
 
         const filterAndSortData = (data, search, monthYear, dateKey = 'data') => {
-            // Usa a versão robusta do filtro de mês/ano
             let filtered = filterDataByMonthYear(data, dateKey, monthYear); 
             
             if (search) {
@@ -262,10 +284,74 @@
                     )
                 );
             }
-            // Garante que a ordenação ocorra em um array válido
             filtered.sort((a, b) => new Date(b[dateKey] || 0) - new Date(a[dateKey] || 0));
             return filtered;
         };
+        
+        /**
+         * Retorna os comprovantes que não estão vinculados a nenhum registro de Faturamento ou Despesa.
+         * @returns {Array} Lista de comprovantes desvinculados.
+         */
+        const getUnlinkedComprovantes = () => {
+            // Um comprovante é considerado "unlinked" se não tiver a propriedade 'linkedTo'
+            return state.comprovantes.filter(c => !c.linkedTo);
+        };
+        
+        /**
+         * Gera o HTML para o seletor de comprovantes.
+         * @param {string} currentComprovanteId ID do comprovante já vinculado (para edição).
+         * @returns {string} HTML do select.
+         */
+        const getComprovantesSelectHTML = (currentComprovanteId = null) => {
+            const unlinked = getUnlinkedComprovantes().sort((a, b) => new Date(b.dataUpload) - new Date(a.dataUpload));
+            const currentComprovante = state.comprovantes.find(c => c.id === currentComprovanteId);
+
+            let options = `<option value="">-- Sem Comprovante Anexado (Opcional) --</option>`;
+            
+            // Adiciona o comprovante atual na lista se estiver em modo de edição
+            if (currentComprovante) {
+                // Adiciona a opção selecionada se estiver vinculado (garantindo que o usuário veja o link atual)
+                options += `<option value="${currentComprovante.id}" selected>VINCLADO (Atual): ${currentComprovante.nomeArquivo} (${currentComprovante.dataUpload})</option>`;
+            }
+
+            // Adiciona comprovantes não vinculados
+            options += unlinked.map(c => 
+                `<option value="${c.id}">${c.nomeArquivo} (${c.dataUpload})</option>`
+            ).join('');
+
+            return options;
+        };
+        
+        /**
+         * Atualiza o documento Comprovante marcando-o como vinculado.
+         * @param {string} newComprovanteId ID do comprovante no Firestore.
+         * @param {string} linkedTo Valor no formato 'colecao:docId' (Ex: 'faturamento:abcde').
+         * @param {string} oldComprovanteId ID do comprovante que estava vinculado antes (para desvincular).
+         */
+        const updateDocumentComprovanteLink = async (newComprovanteId, linkedTo, oldComprovanteId) => {
+            if (!db) return;
+
+            // 1. Desvincular o comprovante antigo
+            if (oldComprovanteId && oldComprovanteId !== newComprovanteId) {
+                try {
+                     await setDoc(doc(db, getCollectionPath('comprovantes'), oldComprovanteId), { linkedTo: null }, { merge: true });
+                } catch (e) {
+                    console.error("Erro ao desvincular comprovante antigo:", e);
+                }
+            }
+
+            // 2. Vincular o novo comprovante (se houver um novo ID e for diferente do antigo)
+            if (newComprovanteId && newComprovanteId !== oldComprovanteId) {
+                try {
+                    const comprovanteRef = doc(db, getCollectionPath('comprovantes'), newComprovanteId);
+                    await setDoc(comprovanteRef, { linkedTo: linkedTo, updatedAt: serverTimestamp() }, { merge: true });
+                } catch (error) {
+                    console.error("Erro ao vincular novo comprovante:", error);
+                    showToast(`Erro ao vincular comprovante: ${error.message}`, 'error');
+                }
+            }
+        };
+
 
         // --- FIREBASE INICIALIZAÇÃO E LISTENERS ---
 
@@ -278,6 +364,26 @@
                 }
                 
                 db = getFirestore(app);
+                auth = getAuth(app);
+                storage = getStorage(app); // NOVO: Inicializa Storage
+
+                // Tenta autenticar
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // Monitora o estado da autenticação
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Firebase e Autenticação prontos. User ID:", userId);
+                    } else {
+                        userId = null;
+                        console.log("Usuário deslogado ou anônimo.");
+                    }
+                });
                 
                 setupFirestoreListeners();
                 render('dashboard');
@@ -318,6 +424,13 @@
                 if (['notasemitidas'].includes(state.activeTab)) render('notasemitidas');
             }, (error) => console.error("Erro no listener de Notas Emitidas:", error));
 
+            // NOVO: Comprovantes (Atualiza todas as abas que usam dados de link)
+            onSnapshot(collection(db, getCollectionPath('comprovantes')), (snapshot) => {
+                state.comprovantes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (['comprovantes', 'faturamento', 'despesas'].includes(state.activeTab)) render(state.activeTab);
+            }, (error) => console.error("Erro no listener de Comprovantes:", error));
+
+
             // Estoque
             onSnapshot(collection(db, getCollectionPath('estoque')), (snapshot) => {
                 state.estoque = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -331,7 +444,7 @@
             }, (error) => console.error("Erro no listener de DAS:", error));
         };
 
-        // --- OPERAÇÕES CRUD E FORMS (Mantidas) ---
+        // --- OPERAÇÕES CRUD E FORMS ---
 
         const saveDocument = async (collectionName, data, id = null) => {
             if (!isAppReady) {
@@ -344,19 +457,25 @@
                 showToast('Erro: Caminho da coleção inválido.', 'error');
                 return;
             }
-
+            
+            // Salva o documento principal
+            let docRef;
             try {
                 if (id) {
-                    await setDoc(doc(db, collectionPath, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+                    docRef = doc(db, collectionPath, id);
+                    await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge: true });
                     showToast(`Item ${collectionName} atualizado com sucesso!`);
+                    return id; 
                 } else {
-                    await addDoc(collection(db, collectionPath), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                    docRef = await addDoc(collection(db, collectionPath), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
                     showToast(`Novo item ${collectionName} adicionado!`);
+                    return docRef.id; 
                 }
-                window.closeModal();
+                
             } catch (error) {
                 console.error(`Erro ao salvar em ${collectionName}:`, error);
                 showToast(`Erro ao salvar: ${error.message}. Verifique as Regras de Segurança do Firestore!`, 'error');
+                return null;
             }
         };
 
@@ -373,6 +492,26 @@
             }
 
             try {
+                // Se for Faturamento ou Despesa, verifica se há comprovante anexado para desvincular
+                if (collectionName === 'faturamento' || collectionName === 'despesas') {
+                    const itemToDelete = state[collectionName].find(item => item.id === id);
+                    if (itemToDelete && itemToDelete.comprovanteId) {
+                        await setDoc(doc(db, getCollectionPath('comprovantes'), itemToDelete.comprovanteId), { linkedTo: null }, { merge: true });
+                    }
+                }
+                
+                // Se for Comprovante, verifica se está vinculado a algo e notifica
+                if (collectionName === 'comprovantes') {
+                    const itemToDelete = state[collectionName].find(item => item.id === id);
+                    if (itemToDelete && itemToDelete.linkedTo) {
+                         const [linkedCollection, linkedId] = itemToDelete.linkedTo.split(':');
+                         if (linkedCollection && linkedId) {
+                             // Tenta desvincular do item principal (limpando o comprovanteId)
+                             await setDoc(doc(db, getCollectionPath(linkedCollection), linkedId), { comprovanteId: null }, { merge: true });
+                         }
+                    }
+                }
+
                 await deleteDoc(doc(db, collectionPath, id));
                 showToast('Item excluído com sucesso!', 'success');
             } catch (error) {
@@ -380,39 +519,65 @@
                 showToast(`Erro ao deletar: ${error.message}. Verifique as Regras de Segurança do Firestore!`, 'error');
             }
         };
-        
-        window.openEntryModal = (collectionName) => {
-            let title = '';
+
+        /**
+         * Abre o modal de entrada/edição com base na coleção e, opcionalmente, nos dados para preenchimento.
+         * @param {string} collectionName Nome da coleção.
+         * @param {Object} data Dados para pré-preenchimento (modo edição).
+         */
+        window.openEntryModal = (collectionName, data = {}) => {
+            let title = data.id ? `Editar Registro (${collectionName})` : 'Novo Registro';
             let formHtml = '';
             
             switch(collectionName) {
-                case 'faturamento': title = 'Nova Venda/Receita'; formHtml = getFaturamentoFormHTML(); break;
-                case 'despesas': title = 'Nova Despesa'; formHtml = getDespesasFormHTML(); break;
-                case 'prolabore': title = 'Registro de Pró-Labore'; formHtml = getProLaboreFormHTML(); break;
-                case 'notasemitidas': title = 'Registro de Nota Fiscal Emitida'; formHtml = getNotasEmitidasFormHTML(); break;
-                case 'estoque': title = 'Novo Item de Estoque'; formHtml = getEstoqueFormHTML(); break;
-                case 'das': title = 'Registro de Pagamento DAS'; formHtml = getDasFormHTML(); break;
-                default: showToast('Funcionalidade de adição não disponível para esta aba.', 'error'); return;
+                case 'faturamento': title = data.id ? 'Editar Venda/Receita' : 'Nova Venda/Receita'; formHtml = getFaturamentoFormHTML(data); break;
+                case 'despesas': title = data.id ? 'Editar Despesa' : 'Nova Despesa'; formHtml = getDespesasFormHTML(data); break;
+                case 'prolabore': title = data.id ? 'Editar Pró-Labore' : 'Registro de Pró-Labore'; formHtml = getProLaboreFormHTML(data); break;
+                case 'notasemitidas': title = data.id ? 'Editar Nota Fiscal' : 'Registro de Nota Fiscal Emitida'; formHtml = getNotasEmitidasFormHTML(data); break;
+                case 'comprovantes': 
+                    title = 'Upload de Comprovante (Imagem/PDF)'; 
+                    formHtml = getComprovantesFormHTML(); 
+                    break; 
+                case 'estoque': title = data.id ? 'Editar Item de Estoque' : 'Novo Item de Estoque'; formHtml = getEstoqueFormHTML(data); break;
+                case 'das': title = data.id ? 'Editar Pagamento DAS' : 'Registro de Pagamento DAS'; formHtml = getDasFormHTML(data); break;
+                default: showToast('Funcionalidade de adição/edição não disponível para esta aba.', 'error'); return;
             }
 
             modalTitle.textContent = title;
             modalFormContainer.innerHTML = formHtml;
             
+            // --- Handlers de Formulário ---
             if (collectionName === 'faturamento') document.getElementById('modal-form').onsubmit = handleFaturamentoSubmit;
             if (collectionName === 'despesas') document.getElementById('modal-form').onsubmit = handleDespesasSubmit;
             if (collectionName === 'prolabore') document.getElementById('modal-form').onsubmit = handleProLaboreSubmit;
             if (collectionName === 'notasemitidas') document.getElementById('modal-form').onsubmit = handleNotasEmitidasSubmit;
             if (collectionName === 'estoque') document.getElementById('modal-form').onsubmit = handleEstoqueSubmit;
             if (collectionName === 'das') document.getElementById('modal-form').onsubmit = handleDasSubmit;
+            if (collectionName === 'comprovantes') setupComprovantesDragDrop();
 
-            const today = new Date().toISOString().split('T')[0];
-            document.querySelectorAll('#modal-form input[type="date"]').forEach(input => input.value = today);
+            // Preenche a data se não estiver em edição (data vazia)
+            if (!data.id) {
+                const today = new Date().toISOString().split('T')[0];
+                document.querySelectorAll('#modal-form input[type="date"]').forEach(input => input.value = today);
+            }
 
             entryModal.classList.remove('hidden');
             setTimeout(() => {
                 entryModal.classList.remove('opacity-0');
                 modalContent.classList.remove('translate-y-4', 'opacity-0');
             }, 10);
+        };
+        
+        /**
+         * Função principal para abrir o modal de edição, buscando os dados do item.
+         */
+        window.openEditModal = (collectionName, id) => {
+            const data = window.state[collectionName].find(item => item.id === id);
+            if (!data) {
+                showToast(`Item com ID ${id} não encontrado em ${collectionName}.`, 'error');
+                return;
+            }
+            window.openEntryModal(collectionName, data);
         };
 
         window.closeModal = () => {
@@ -424,7 +589,7 @@
             }, { once: true });
         };
         
-        // --- RENDERIZAÇÃO DE FORMULÁRIOS (Mantidas) ---
+        // --- RENDERIZAÇÃO DE FORMULÁRIOS (MODIFICADOS PARA EDIÇÃO) ---
 
         const getInputClasses = () => 'p-3 rounded-lg bg-[#2a2a2a] border border-[#333] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm w-full';
         
@@ -434,210 +599,296 @@
             </button>
         `;
 
-        const getFaturamentoFormHTML = () => `
-            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <label for="fat-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Venda</label>
-                    <input type="date" name="data" id="fat-data" required class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="fat-cliente" class="block text-sm font-medium text-gray-400 mb-1">Cliente (Opcional)</label>
-                    <input type="text" name="cliente" id="fat-cliente" placeholder="Nome ou Referência" class="${getInputClasses()}">
-                </div>
-                <div class="col-span-full">
-                    <label for="fat-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição do Item/Serviço</label>
-                    <input type="text" name="descricao" id="fat-descricao" required class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="fat-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
-                    <select name="pagamento" id="fat-pagamento" class="${getInputClasses()}">
-                        <option value="Cartão">Cartão</option>
-                        <option value="Pix">Pix</option>
-                        <option value="Dinheiro">Dinheiro</option>
-                        <option value="Boleto">Boleto</option>
-                        <option value="Outro">Outro</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="fat-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Venda (R$)</label>
-                    <input type="number" step="0.01" name="valor" id="fat-valor" placeholder="100.00" required class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="fat-custo" class="block text-sm font-medium text-gray-400 mb-1">Custo do Item/Serviço (R$)</label>
-                    <input type="number" step="0.01" name="custo" id="fat-custo" placeholder="0.00" value="0.00" class="${getInputClasses()}">
-                </div>
-                ${getSubmitButton('Salvar Venda', 'ph-plus-circle')}
-            </form>
-        `;
+        // MODIFICADO: Adicionado campo para comprovante e preenchimento de dados
+        const getFaturamentoFormHTML = (data = {}) => {
+            const idInput = data.id ? `<input type="hidden" name="id" value="${data.id}">` : '';
+            const oldComprovanteIdInput = data.comprovanteId ? `<input type="hidden" name="oldComprovanteId" value="${data.comprovanteId}">` : '';
+            
+            return `
+                <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    ${idInput}
+                    ${oldComprovanteIdInput}
+                    <div>
+                        <label for="fat-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Venda</label>
+                        <input type="date" name="data" id="fat-data" required value="${data.data || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="fat-cliente" class="block text-sm font-medium text-gray-400 mb-1">Cliente (Opcional)</label>
+                        <input type="text" name="cliente" id="fat-cliente" placeholder="Nome ou Referência" value="${data.cliente || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div class="col-span-full">
+                        <label for="fat-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição do Item/Serviço</label>
+                        <input type="text" name="descricao" id="fat-descricao" required value="${data.descricao || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="fat-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
+                        <select name="pagamento" id="fat-pagamento" class="${getInputClasses()}">
+                            ${['Cartão', 'Pix', 'Dinheiro', 'Boleto', 'Outro'].map(opt => 
+                                `<option value="${opt}" ${data.pagamento === opt ? 'selected' : ''}>${opt}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="fat-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Venda (R$)</label>
+                        <input type="number" step="0.01" name="valor" id="fat-valor" placeholder="100.00" required value="${data.valor || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="fat-custo" class="block text-sm font-medium text-gray-400 mb-1">Custo do Item/Serviço (R$)</label>
+                        <input type="number" step="0.01" name="custo" id="fat-custo" placeholder="0.00" value="${data.custo || 0.00}" class="${getInputClasses()}">
+                    </div>
+                    <div class="col-span-full">
+                        <label for="fat-comprovante" class="block text-sm font-medium text-gray-400 mb-1">Anexar Comprovante (Opcional)</label>
+                        <select name="comprovanteId" id="fat-comprovante" class="${getInputClasses()}">
+                            ${getComprovantesSelectHTML(data.comprovanteId)}
+                        </select>
+                        <button type="button" onclick="window.openEntryModal('comprovantes')" class="text-xs text-gray-500 mt-1 hover:text-neon-green transition duration-200">
+                            <i class="ph-bold ph-paperclip"></i> Adicionar novo arquivo?
+                        </button>
+                    </div>
+                    ${getSubmitButton(data.id ? 'Atualizar Venda' : 'Salvar Venda', data.id ? 'ph-check' : 'ph-plus-circle')}
+                </form>
+            `;
+        };
 
-        const getDespesasFormHTML = () => `
-            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <label for="des-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Despesa</label>
-                    <input type="date" name="data" id="des-data" required class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="des-tipo" class="block text-sm font-medium text-gray-400 mb-1">Tipo de Despesa</label>
-                    <select name="tipo" id="des-tipo" class="${getInputClasses()}">
-                        <option value="Aluguel">Aluguel</option>
-                        <option value="Serviços">Serviços</option>
-                        <option value="Marketing">Marketing</option>
-                        <option value="Impostos">Impostos (Gerais)</option>
-                        <option value="Contabilidade">Contabilidade</option>
-                        <option value="Outros">Outros</option>
-                    </select>
-                </div>
-                <div class="col-span-full">
-                    <label for="des-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição da Despesa</label>
-                    <input type="text" name="descricao" id="des-descricao" required class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="des-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
-                    <select name="pagamento" id="des-pagamento" class="${getInputClasses()}">
-                        <option value="Cartão">Cartão</option>
-                        <option value="Pix">Pix</option>
-                        <option value="Dinheiro">Dinheiro</option>
-                        <option value="Boleto">Boleto</option>
-                        <option value="Transferência">Transferência</option>
-                        <option value="Outro">Outro</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="des-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor (R$)</label>
-                    <input type="number" step="0.01" name="valor" id="des-valor" placeholder="50.00" required class="${getInputClasses()}">
-                </div>
-                ${getSubmitButton('Salvar Despesa', 'ph-trend-down')}
-            </form>
-        `;
+        // MODIFICADO: Adicionado campo para comprovante e preenchimento de dados
+        const getDespesasFormHTML = (data = {}) => {
+            const idInput = data.id ? `<input type="hidden" name="id" value="${data.id}">` : '';
+            const oldComprovanteIdInput = data.comprovanteId ? `<input type="hidden" name="oldComprovanteId" value="${data.comprovanteId}">` : '';
 
-        const getProLaboreFormHTML = () => `
+            return `
+                <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    ${idInput}
+                    ${oldComprovanteIdInput}
+                    <div>
+                        <label for="des-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Despesa</label>
+                        <input type="date" name="data" id="des-data" required value="${data.data || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="des-tipo" class="block text-sm font-medium text-gray-400 mb-1">Tipo de Despesa</label>
+                        <select name="tipo" id="des-tipo" class="${getInputClasses()}">
+                            ${['Aluguel', 'Serviços', 'Marketing', 'Impostos', 'Contabilidade', 'Outros'].map(opt => 
+                                `<option value="${opt}" ${data.tipo === opt ? 'selected' : ''}>${opt}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="col-span-full">
+                        <label for="des-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição da Despesa</label>
+                        <input type="text" name="descricao" id="des-descricao" required value="${data.descricao || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="des-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
+                        <select name="pagamento" id="des-pagamento" class="${getInputClasses()}">
+                            ${['Cartão', 'Pix', 'Dinheiro', 'Boleto', 'Transferência', 'Outro'].map(opt => 
+                                `<option value="${opt}" ${data.pagamento === opt ? 'selected' : ''}>${opt}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="des-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor (R$)</label>
+                        <input type="number" step="0.01" name="valor" id="des-valor" placeholder="50.00" required value="${data.valor || ''}" class="${getInputClasses()}">
+                    </div>
+                    <div>
+                        <label for="des-comprovante" class="block text-sm font-medium text-gray-400 mb-1">Anexar Comprovante (Opcional)</label>
+                        <select name="comprovanteId" id="des-comprovante" class="${getInputClasses()}">
+                            ${getComprovantesSelectHTML(data.comprovanteId)}
+                        </select>
+                        <button type="button" onclick="window.openEntryModal('comprovantes')" class="text-xs text-gray-500 mt-1 hover:text-neon-green transition duration-200">
+                            <i class="ph-bold ph-paperclip"></i> Adicionar novo arquivo?
+                        </button>
+                    </div>
+                    ${getSubmitButton(data.id ? 'Atualizar Despesa' : 'Salvar Despesa', data.id ? 'ph-check' : 'ph-trend-down')}
+                </form>
+            `;
+        };
+
+        // MODIFICADO: Preenchimento de dados
+        const getProLaboreFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
                 <div>
                     <label for="pl-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Retirada</label>
-                    <input type="date" name="data" id="pl-data" required class="${getInputClasses()}">
+                    <input type="date" name="data" id="pl-data" required value="${data.data || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="pl-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Retirado (R$)</label>
-                    <input type="number" step="0.01" name="valor" id="pl-valor" placeholder="1000.00" required class="${getInputClasses()}">
+                    <input type="number" step="0.01" name="valor" id="pl-valor" placeholder="1000.00" required value="${data.valor || ''}" class="${getInputClasses()}">
                 </div>
                 <div class="col-span-full">
                     <label for="pl-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição (Ex: Retirada Mensal, Adiantamento)</label>
-                    <input type="text" name="descricao" id="pl-descricao" required class="${getInputClasses()}">
+                    <input type="text" name="descricao" id="pl-descricao" required value="${data.descricao || ''}" class="${getInputClasses()}">
                 </div>
-                ${getSubmitButton('Registrar Retirada', 'ph-wallet-fill')}
+                ${getSubmitButton(data.id ? 'Atualizar Retirada' : 'Registrar Retirada', data.id ? 'ph-check' : 'ph-wallet-fill')}
             </form>
         `;
 
-        const getNotasEmitidasFormHTML = () => `
+        // MODIFICADO: Preenchimento de dados
+        const getNotasEmitidasFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
                 <div>
                     <label for="ne-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Emissão</label>
-                    <input type="date" name="dataEmissao" id="ne-data" required class="${getInputClasses()}">
+                    <input type="date" name="dataEmissao" id="ne-data" required value="${data.dataEmissao || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="ne-nf" class="block text-sm font-medium text-gray-400 mb-1">Número da NF</label>
-                    <input type="text" name="numeroNF" id="ne-nf" placeholder="Ex: 000123" required class="${getInputClasses()}">
+                    <input type="text" name="numeroNF" id="ne-nf" placeholder="Ex: 000123" required value="${data.numeroNF || ''}" class="${getInputClasses()}">
                 </div>
                 <div class="col-span-full">
                     <label for="ne-cliente" class="block text-sm font-medium text-gray-400 mb-1">Cliente/Tomador do Serviço</label>
-                    <input type="text" name="cliente" id="ne-cliente" placeholder="Nome ou CNPJ" required class="${getInputClasses()}">
+                    <input type="text" name="cliente" id="ne-cliente" placeholder="Nome ou CNPJ" required value="${data.cliente || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="ne-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Total da NF (R$)</label>
-                    <input type="number" step="0.01" name="valor" id="ne-valor" placeholder="1500.00" required class="${getInputClasses()}">
+                    <input type="number" step="0.01" name="valor" id="ne-valor" placeholder="1500.00" required value="${data.valor || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="ne-descricao" class="block text-sm font-medium text-gray-400 mb-1">Serviço/Produto Faturado</label>
-                    <input type="text" name="descricao" id="ne-descricao" placeholder="Referência do contrato ou serviço" required class="${getInputClasses()}">
+                    <input type="text" name="descricao" id="ne-descricao" placeholder="Referência do contrato ou serviço" required value="${data.descricao || ''}" class="${getInputClasses()}">
                 </div>
-                ${getSubmitButton('Salvar Nota Fiscal', 'ph-receipt')}
+                ${getSubmitButton(data.id ? 'Atualizar Nota Fiscal' : 'Salvar Nota Fiscal', data.id ? 'ph-check' : 'ph-receipt')}
             </form>
         `;
 
-        const getEstoqueFormHTML = () => `
+        // MODIFICADO: Preenchimento de dados
+        const getEstoqueFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
                 <div class="col-span-full">
                     <label for="est-item" class="block text-sm font-medium text-gray-400 mb-1">Nome do Item</label>
-                    <input type="text" name="item" id="est-item" required class="${getInputClasses()}">
+                    <input type="text" name="item" id="est-item" required value="${data.item || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="est-quantidade" class="block text-sm font-medium text-gray-400 mb-1">Quantidade Atual</label>
-                    <input type="number" name="quantidade" id="est-quantidade" placeholder="Ex: 10" required class="${getInputClasses()}">
+                    <input type="number" name="quantidade" id="est-quantidade" placeholder="Ex: 10" required value="${data.quantidade || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="est-custounitario" class="block text-sm font-medium text-gray-400 mb-1">Custo Unitário (R$)</label>
-                    <input type="number" step="0.01" name="custoUnitario" id="est-custounitario" placeholder="Ex: 15.50" required class="${getInputClasses()}">
+                    <input type="number" step="0.01" name="custoUnitario" id="est-custounitario" placeholder="Ex: 15.50" required value="${data.custoUnitario || ''}" class="${getInputClasses()}">
                 </div>
-                ${getSubmitButton('Adicionar/Atualizar Estoque', 'ph-box-add')}
+                ${getSubmitButton(data.id ? 'Atualizar Estoque' : 'Adicionar/Atualizar Estoque', data.id ? 'ph-check' : 'ph-box-add')}
             </form>
         `;
 
-        const getDasFormHTML = () => `
+        // MODIFICADO: Preenchimento de dados
+        const getDasFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
                 <div>
                     <label for="das-mes" class="block text-sm font-medium text-gray-400 mb-1">Mês de Referência</label>
-                    <input type="month" name="mesReferencia" id="das-mes" required class="${getInputClasses()}">
+                    <input type="month" name="mesReferencia" id="das-mes" required value="${data.mesReferencia || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="das-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor DAS Pago (R$)</label>
-                    <input type="number" step="0.01" name="valorDas" id="das-valor" required class="${getInputClasses()}">
+                    <input type="number" step="0.01" name="valorDas" id="das-valor" required value="${data.valorDas || ''}" class="${getInputClasses()}">
                 </div>
                 <div>
                     <label for="das-pagoem" class="block text-sm font-medium text-gray-400 mb-1">Data de Pagamento</label>
-                    <input type="date" name="pagoEm" id="das-pagoem" required class="${getInputClasses()}">
+                    <input type="date" name="pagoEm" id="das-pagoem" required value="${data.pagoEm || ''}" class="${getInputClasses()}">
                 </div>
-                ${getSubmitButton('Registrar Pagamento DAS', 'ph-wallet')}
+                ${getSubmitButton(data.id ? 'Atualizar Pagamento DAS' : 'Registrar Pagamento DAS', data.id ? 'ph-check' : 'ph-wallet')}
             </form>
         `;
 
-        // --- SUBMIT HANDLERS (Mantidas) ---
+        // Formulário de Upload de Comprovantes (inalterado)
+        const getComprovantesFormHTML = () => `
+            <form id="modal-form" onsubmit="event.preventDefault()">
+                <div id="dropArea" class="drop-area flex flex-col items-center justify-center p-8 rounded-lg cursor-pointer transition-all">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 text-blue-500 mb-3 neon-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p class="text-gray-200 font-medium text-center">Arraste e Solte o arquivo aqui</p>
+                    <p class="text-sm text-gray-400 mt-1">ou clique para selecionar (JPG, PNG ou PDF)</p>
+                    <input type="file" id="comprovanteFileInput" accept="image/*, application/pdf" multiple class="hidden">
+                    <div id="uploadStatus" class="mt-4 text-sm text-gray-400">Aguardando arquivo...</div>
+                    <div id="progressBarContainer" class="w-full mt-2 h-2 bg-[#2a2a2a] rounded-full hidden">
+                        <div id="progressBar" class="h-2 bg-[#00ff88] rounded-full transition-all duration-300" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </form>
+        `;
 
-        const handleFaturamentoSubmit = (e) => {
+        // --- SUBMIT HANDLERS (MODIFICADOS PARA EDIÇÃO E VÍNCULO) ---
+        
+        // MODIFICADO: Inclui tratamento para ID, comprovanteId e oldComprovanteId
+        const handleFaturamentoSubmit = async (e) => {
             e.preventDefault();
             const form = e.target;
+            
+            const id = form.id?.value || null;
+            const oldComprovanteId = form.oldComprovanteId?.value || null;
+            const newComprovanteId = form.comprovanteId.value || null;
+
             const valor = parseFloat(form.valor.value);
             const custo = parseFloat(form.custo.value || 0);
-            const lucro = valor - custo;
 
             const newEntry = {
                 data: form.data.value, cliente: form.cliente.value || 'N/A', descricao: form.descricao.value,
-                pagamento: form.pagamento.value, valor: valor, custo: custo, lucro: lucro,
+                pagamento: form.pagamento.value, valor: valor, custo: custo, 
+                lucro: valor - custo,
+                comprovanteId: newComprovanteId || null,
             };
-            saveDocument('faturamento', newEntry);
+            
+            const savedDocId = await saveDocument('faturamento', newEntry, id);
+            
+            if (savedDocId) {
+                if (newComprovanteId !== oldComprovanteId) {
+                    await updateDocumentComprovanteLink(newComprovanteId, `faturamento:${savedDocId}`, oldComprovanteId);
+                }
+            }
         };
 
-        const handleDespesasSubmit = (e) => {
+        // MODIFICADO: Inclui tratamento para ID, comprovanteId e oldComprovanteId
+        const handleDespesasSubmit = async (e) => {
             e.preventDefault();
             const form = e.target;
+            
+            const id = form.id?.value || null;
+            const oldComprovanteId = form.oldComprovanteId?.value || null;
+            const newComprovanteId = form.comprovanteId.value || null;
+
             const newEntry = {
                 data: form.data.value, tipo: form.tipo.value, descricao: form.descricao.value,
                 pagamento: form.pagamento.value, valor: parseFloat(form.valor.value),
+                comprovanteId: newComprovanteId || null,
             };
-            saveDocument('despesas', newEntry);
+            
+            const savedDocId = await saveDocument('despesas', newEntry, id);
+
+            if (savedDocId) {
+                if (newComprovanteId !== oldComprovanteId) {
+                    await updateDocumentComprovanteLink(newComprovanteId, `despesas:${savedDocId}`, oldComprovanteId);
+                }
+            }
         };
         
+        // MODIFICADO: Inclui tratamento para ID
         const handleProLaboreSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
+            const id = form.id?.value || null;
+
             const newEntry = {
                 data: form.data.value, descricao: form.descricao.value, valor: parseFloat(form.valor.value),
             };
-            saveDocument('prolabore', newEntry);
+            saveDocument('prolabore', newEntry, id);
         };
         
+        // MODIFICADO: Inclui tratamento para ID
         const handleNotasEmitidasSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
+            const id = form.id?.value || null;
+
             const newEntry = {
                 dataEmissao: form.dataEmissao.value, numeroNF: form.numeroNF.value, cliente: form.cliente.value,
                 valor: parseFloat(form.valor.value), descricao: form.descricao.value,
             };
-            saveDocument('notasemitidas', newEntry);
+            saveDocument('notasemitidas', newEntry, id);
         };
 
+        // MODIFICADO: Inclui tratamento para ID
         const handleEstoqueSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
+            const id = form.id?.value || null;
             const quantidade = parseFloat(form.quantidade.value);
             const custoUnitario = parseFloat(form.custoUnitario.value);
             const total = quantidade * custoUnitario;
@@ -646,25 +897,149 @@
                 item: form.item.value, quantidade: quantidade, custoUnitario: custoUnitario, total: total,
             };
             
-            const existingItem = state.estoque.find(i => i.item && i.item.toLowerCase() === newItem.item.toLowerCase());
-            saveDocument('estoque', newItem, existingItem ? existingItem.id : null);
+            // Lógica de update/insert baseada no ID ou no nome do item
+            if (id) {
+                saveDocument('estoque', newItem, id);
+            } else {
+                const existingItem = state.estoque.find(i => i.item && i.item.toLowerCase() === newItem.item.toLowerCase());
+                saveDocument('estoque', newItem, existingItem ? existingItem.id : null);
+            }
         };
 
+        // MODIFICADO: Inclui tratamento para ID
         const handleDasSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
+            const id = form.id?.value || null;
+            
             const newEntry = {
                 mesReferencia: form.mesReferencia.value, valorDas: parseFloat(form.valorDas.value), pagoEm: form.pagoEm.value,
             };
-            const existingItem = state.das.find(i => i.mesReferencia === newEntry.mesReferencia);
-            saveDocument('das', newEntry, existingItem ? existingItem.id : null);
+
+            if (id) {
+                saveDocument('das', newEntry, id);
+            } else {
+                const existingItem = state.das.find(i => i.mesReferencia === newEntry.mesReferencia);
+                saveDocument('das', newEntry, existingItem ? existingItem.id : null);
+            }
         };
         
-        // --- RENDERIZAÇÃO DE TABELAS E ABAS (Mantidas) ---
+        // --- LÓGICA DE UPLOAD DE ARQUIVOS (INALTERADA) ---
+        
+        function setupComprovantesDragDrop() {
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('comprovanteFileInput');
+            
+            if (!dropArea || !fileInput) return;
+
+            dropArea.addEventListener('click', () => fileInput.click());
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileUpload(e.target.files[0]); 
+                }
+            });
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
+            });
+
+            dropArea.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                if (dt.files.length > 0) {
+                    handleFileUpload(dt.files[0]);
+                }
+            }, false);
+        }
+
+        async function handleFileUpload(file) {
+            if (!userId || !storage) {
+                showToast('Erro de autenticação ou Storage não inicializado.', 'error');
+                return;
+            }
+            
+            const uploadStatus = document.getElementById('uploadStatus');
+            const progressBarContainer = document.getElementById('progressBarContainer');
+            const progressBar = document.getElementById('progressBar');
+            
+            if (!file.type.match('image.*') && file.type !== 'application/pdf') {
+                showToast('Tipo de arquivo não suportado. Use JPG, PNG ou PDF.', 'error');
+                return;
+            }
+            
+            const fileName = file.name;
+            const timestamp = Date.now();
+            const storagePath = `comprovantes/${userId}/${timestamp}_${fileName}`;
+            const storageRef = ref(storage, storagePath);
+
+            uploadStatus.textContent = `Iniciando upload de ${fileName}...`;
+            progressBarContainer.classList.remove('hidden');
+
+            try {
+                
+                const snapshot = await uploadBytes(storageRef, file);
+                const downloadURL = await getDownloadURL(snapshot.ref);
+
+                const newComprovante = {
+                    nomeArquivo: fileName,
+                    tipoArquivo: file.type,
+                    dataUpload: new Date().toISOString().split('T')[0],
+                    url: downloadURL,
+                    tamanho: file.size, 
+                    linkedTo: null, 
+                };
+
+                await addDoc(collection(db, getCollectionPath('comprovantes')), { 
+                    ...newComprovante, 
+                    createdAt: serverTimestamp() 
+                });
+                
+                progressBar.style.width = '100%';
+                showToast(`Comprovante "${fileName}" enviado e registrado!`, 'success');
+                window.closeModal();
+
+            } catch (error) {
+                console.error("Erro no upload ou registro:", error);
+                showToast(`Falha no upload: ${error.message}`, 'error');
+            } finally {
+                progressBarContainer.classList.add('hidden');
+                progressBar.style.width = '0%';
+                uploadStatus.textContent = 'Aguardando arquivo...';
+            }
+        }
+        
+        /**
+         * Abre a URL do comprovante em uma nova aba.
+         * @param {string} comprovanteId ID do documento de comprovante no Firestore.
+         */
+        window.openLinkedComprovante = (comprovanteId) => {
+            const comprovante = state.comprovantes.find(c => c.id === comprovanteId);
+            if (comprovante && comprovante.url) {
+                window.open(decodeURIComponent(comprovante.url), '_blank');
+            } else {
+                showToast('URL do comprovante não encontrada.', 'error');
+            }
+        };
+
+
+        // --- RENDERIZAÇÃO DE TABELAS (MODIFICADA PARA BOTÃO DE EDIÇÃO) ---
 
         const renderControls = (collectionName) => {
-            // Usa 'data' como default, mas Nota Fiscal usa 'dataEmissao'
-            const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : 'data';
+            const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
             
             return `
                 <div class="flex flex-col sm:flex-row gap-4 mb-6 card p-4 rounded-xl border border-[#333]">
@@ -700,6 +1075,10 @@
             if (filteredData.length === 0) {
                 return `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum registro encontrado.</div>`;
             }
+            
+            // Adiciona coluna de comprovante para Faturamento e Despesas
+            const addComprovanteColumn = collectionName === 'faturamento' || collectionName === 'despesas';
+            const extraHeader = addComprovanteColumn ? `<th class="p-3 text-center font-medium w-16">Arq.</th>` : '';
 
             const headerHTML = headers.map(h => `<th class="p-3 text-left font-medium">${h}</th>`).join('');
             
@@ -709,8 +1088,14 @@
                     let displayValue = value;
                     let colorClass = '';
 
-                    if (key.includes('data') || key.includes('Data') || key.includes('pagoEm')) {
-                        displayValue = value ? new Date(value + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
+                    if (key.includes('data') || key.includes('Data') || key.includes('pagoEm') || key === 'mesReferencia') {
+                        if (key === 'mesReferencia' && value) {
+                            // Formata YYYY-MM para Mês/Ano
+                            const [year, month] = value.split('-');
+                            displayValue = `${month}/${year}`;
+                        } else {
+                            displayValue = value ? new Date(value + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
+                        }
                     } else if (valueColumns.includes(key)) {
                         if (collectionName === 'faturamento' && key === 'valor') colorClass = 'neon-text';
                         if (collectionName === 'faturamento' && key === 'custo') colorClass = 'text-red-400';
@@ -725,9 +1110,27 @@
 
                     return `<td class="p-3 border-t border-[#333] ${colorClass}">${displayValue}</td>`;
                 }).join('');
+                
+                let comprovanteCell = '';
+                if (addComprovanteColumn) {
+                    const comprovanteId = item.comprovanteId;
+                    const iconButton = comprovanteId ? 
+                        `<button onclick="event.stopPropagation(); openLinkedComprovante('${comprovanteId}')" title="Ver Comprovante Anexado" class="text-blue-400 hover:text-blue-300 p-1 rounded-full hover:bg-[#333] transition active:scale-95 touch-action-manipulation">
+                            <i class="ph-bold ph-file-text text-lg"></i>
+                        </button>` : 
+                        `<span class="text-gray-600 p-1"><i class="ph-bold ph-file-dashed text-lg"></i></span>`;
+                    
+                    comprovanteCell = `<td class="p-3 border-t border-[#333] text-center">${iconButton}</td>`;
+                }
+
 
                 const actionsHTML = `
-                    <td class="p-3 border-t border-[#333] text-right">
+                    <td class="p-3 border-t border-[#333] text-right whitespace-nowrap">
+                        <button onclick="openEditModal('${collectionName}', '${item.id}')" 
+                                class="text-gray-400 hover:text-yellow-400 p-1 rounded-full hover:bg-[#333] transition active:scale-95 touch-action-manipulation mr-1"
+                                aria-label="Editar item">
+                            <i class="ph-bold ph-pencil-simple text-lg"></i>
+                        </button>
                         <button onclick="deleteDocument('${collectionName}', '${item.id}')" 
                                 class="text-red-500 hover:text-red-400 p-1 rounded-full hover:bg-[#333] transition active:scale-95 touch-action-manipulation"
                                 aria-label="Excluir item">
@@ -736,13 +1139,16 @@
                     </td>
                 `;
 
-                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${actionsHTML}</tr>`;
+                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${comprovanteCell}${actionsHTML}</tr>`;
             }).join('');
             
             let totalRowHTML = '';
             let totalValue = 0;
             let totalClass = 'text-white';
-            let totalColspan = dataKeys.length - 1; 
+            let totalColspan = dataKeys.length; 
+            
+            // Ajusta o colspan para incluir a coluna de Arquivo no total
+            const finalColspan = addComprovanteColumn ? dataKeys.length + 1 : dataKeys.length;
 
             if (collectionName === 'faturamento') {
                 const totalFaturamento = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
@@ -754,6 +1160,7 @@
                         <td class="p-3 neon-text">${formatCurrency(totalFaturamento)}</td>
                         <td class="p-3 text-red-400">${formatCurrency(totalCusto)}</td>
                         <td class="p-3 ${totalLucro >= 0 ? 'neon-text' : 'text-red-400'}">${formatCurrency(totalLucro)}</td>
+                        ${addComprovanteColumn ? '<td></td>' : ''}
                         <td class="p-3"></td>
                     </tr>
                 `;
@@ -762,8 +1169,9 @@
                 totalClass = 'text-red-400';
                 totalRowHTML = `
                     <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
-                        <td class="p-3 text-white" colspan="${totalColspan}">TOTAL DE DESPESAS NO PERÍODO:</td>
+                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE DESPESAS NO PERÍODO:</td>
                         <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
+                        ${addComprovanteColumn ? '<td></td>' : ''}
                         <td class="p-3"></td>
                     </tr>
                 `;
@@ -772,7 +1180,7 @@
                 totalClass = 'text-yellow-400';
                 totalRowHTML = `
                     <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
-                        <td class="p-3 text-white" colspan="${totalColspan}">TOTAL DE PRÓ-LABORE NO PERÍODO:</td>
+                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE PRÓ-LABORE NO PERÍODO:</td>
                         <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
                         <td class="p-3"></td>
                     </tr>
@@ -780,10 +1188,9 @@
             } else if (collectionName === 'notasemitidas') {
                 totalValue = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
                 totalClass = 'text-indigo-400';
-                totalColspan = dataKeys.length - 1; 
                 totalRowHTML = `
                     <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
-                        <td class="p-3 text-white" colspan="${totalColspan}">TOTAL DE NOTAS EMITIDAS NO PERÍODO:</td>
+                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE NOTAS EMITIDAS NO PERÍODO:</td>
                         <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
                         <td class="p-3"></td>
                     </tr>
@@ -794,10 +1201,10 @@
                 <div class="overflow-x-auto custom-scrollbar shadow-lg rounded-xl card mb-6 border border-[#333]">
                     <table class="min-w-full table-auto text-sm">
                         <thead class="bg-[#282828]">
-                            <tr>${headerHTML}<th class="p-3 text-right font-medium">Ações</th></tr>
+                            <tr>${headerHTML}${extraHeader}<th class="p-3 text-right font-medium w-32">Ações</th></tr>
                         </thead>
                         <tbody>
-                            ${rowsHTML.length > 0 ? totalRowHTML : ''}
+                            ${rowsHTML.length > 0 && collectionName !== 'comprovantes' && totalRowHTML}
                             ${rowsHTML}
                         </tbody>
                     </table>
@@ -843,6 +1250,66 @@
             tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Notas Fiscais Emitidas</h2>${renderControls('notasemitidas')}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-indigo-500"><p class="text-sm font-medium text-gray-400">Total Faturado em NF:</p><p class="text-3xl font-bold mt-1 notas-text">${formatCurrency(totalNotas)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Notas</h3><div id="notasemitidas-table-container">${createTableHTML('notasemitidas', data, headers, dataKeys, valueColumns)}</div>`;
         };
 
+        // MODIFICADO: Exibe o status de vínculo do comprovante
+        const renderComprovantes = () => {
+            const tabEl = document.getElementById('comprovantes');
+            const data = state.comprovantes.sort((a, b) => new Date(b.dataUpload) - new Date(a.dataUpload));
+            
+            // Renderiza o grid de comprovantes
+            const comprovanteCardsHTML = data.map(item => {
+                const isImage = item.tipoArquivo && item.tipoArquivo.startsWith('image/');
+                const icon = isImage ? 'ph-image-square-fill' : 'ph-file-pdf-fill';
+                const fileTypeColor = isImage ? 'text-blue-400' : 'text-red-400';
+                
+                const linked = item.linkedTo ? item.linkedTo.split(':') : null;
+                const linkedCollection = linked ? (linked[0] === 'faturamento' ? 'Venda' : 'Despesa') : null;
+                const linkedId = linked ? linked[1] : null;
+
+                const linkStatus = linked ? 
+                    `<p class="text-xs text-yellow-400 font-medium mt-1">Vinculado a: ${linkedCollection} (ID: ${linkedId.substring(0, 5)}...)</p>` :
+                    `<p class="text-xs text-gray-500 font-medium mt-1">Status: Não Vinculado</p>`;
+
+
+                return `
+                    <div class="file-card p-4 rounded-xl shadow-lg flex flex-col justify-between">
+                        <div class="flex items-start justify-between mb-3">
+                            <i class="ph-bold ${icon} text-3xl ${fileTypeColor}"></i>
+                            <button onclick="window.open(decodeURIComponent('${item.url}'), '_blank')" 
+                                    class="p-1 text-gray-400 hover:text-white transition active:scale-95"
+                                    aria-label="Abrir arquivo">
+                                <i class="ph-bold ph-eye text-xl"></i>
+                            </button>
+                        </div>
+                        
+                        <p class="text-sm font-semibold truncate text-white mb-1">${item.nomeArquivo}</p>
+                        <div class="text-xs text-gray-400">
+                            <p>Upload: ${item.dataUpload ? new Date(item.dataUpload + 'T00:00:00').toLocaleDateString('pt-BR') : 'N/A'}</p>
+                            ${linkStatus}
+                        </div>
+                        
+                        <button onclick="deleteDocument('comprovantes', '${item.id}')" 
+                                class="w-full mt-3 text-xs py-1 text-red-400 hover:bg-[#333] rounded-lg transition active:scale-95">
+                            Excluir
+                        </button>
+                    </div>
+                `;
+            }).join('');
+
+            tabEl.innerHTML = `
+                <h2 class="text-2xl font-semibold mb-6 neon-text">Arquivos Digitais de Comprovantes</h2>
+                <div class="card p-4 mb-6 rounded-xl border border-[#333]">
+                    <p class="text-sm text-gray-400">Guarde aqui as fotos de notas, recibos, guias DAS e qualquer documento fiscal que você queira digitalizar. Arquivos aceitos: Imagens (JPG, PNG) e PDFs.</p>
+                </div>
+                
+                <h3 class="text-xl font-semibold mb-3 neon-text">Documentos Armazenados (${data.length})</h3>
+
+                ${data.length === 0 
+                    ? `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum comprovante digitalizado ainda. Clique no <i class="ph-bold ph-plus"></i> para começar!</div>`
+                    : `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">${comprovanteCardsHTML}</div>`
+                }
+            `;
+        };
+
         const renderEstoque = () => {
             const tabEl = document.getElementById('estoque');
             const data = state.estoque;
@@ -864,14 +1331,13 @@
 
 
         // --- DASHBOARD AND CHART LOGIC ---
-        
+        // (Mantidos inalterados)
+
         const calculateKPIs = (monthYearFilter) => {
-            // Aplica o filtro de Mês/Ano a todos os conjuntos de dados relevantes (função de filtro agora é robusta)
             const filteredFaturamento = filterDataByMonthYear(state.faturamento, 'data', monthYearFilter);
             const filteredDespesas = filterDataByMonthYear(state.despesas, 'data', monthYearFilter);
             const filteredProlabore = filterDataByMonthYear(state.prolabore, 'data', monthYearFilter);
 
-            // Cálculos usando os dados filtrados. O .reduce() está seguro porque filterDataByMonthYear retorna um array.
             const faturamentoTotal = filteredFaturamento.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
             const despesasOperacionais = filteredDespesas.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
             const custosFaturamento = filteredFaturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
@@ -913,31 +1379,27 @@
                 return `${year}-${month}-${day}`;
             };
             
-            // FILTRA OS DADOS DO GRÁFICO PRIMEIRO, USANDO O FILTRO DO DASHBOARD
             const filteredFaturamento = filterDataByMonthYear(state.faturamento, dateKey, dashboardMonthYearFilter);
             const filteredDespesas = filterDataByMonthYear(state.despesas, dateKey, dashboardMonthYearFilter);
             const filteredProlabore = filterDataByMonthYear(state.prolabore, dateKey, dashboardMonthYearFilter);
 
-            // Agregação de dados
             const aggregateData = (data, targetKey, isCost = false) => {
                 data.forEach(item => {
                     const key = getGroupKey(item[dateKey]);
                     if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0, prolabore: 0 };
                     
                     if (isCost) {
-                         // Trata custos de faturamento (custo)
                         aggregated[key][targetKey] += parseFloat(item.custo || 0); 
                     } else {
-                        // Trata faturamento, despesas operacionais e pró-labore (valor)
                         aggregated[key][targetKey] += parseFloat(item.valor || 0);
                     }
                 });
             };
 
             aggregateData(filteredFaturamento, 'faturamento');
-            aggregateData(filteredFaturamento, 'despesas', true); // Custos de Faturamento (coluna custo)
-            aggregateData(filteredDespesas, 'despesas');          // Despesas Operacionais (coluna valor)
-            aggregateData(filteredProlabore, 'prolabore');        // Pró-Labore
+            aggregateData(filteredFaturamento, 'despesas', true); 
+            aggregateData(filteredDespesas, 'despesas');          
+            aggregateData(filteredProlabore, 'prolabore');        
 
             const sortedKeys = Object.keys(aggregated).sort();
 
@@ -1021,7 +1483,6 @@
 
         const renderDashboard = () => {
             const tabEl = document.getElementById('dashboard');
-            // NOVO: Passa o filtro atual para calculateKPIs
             const { faturamentoTotal, despesasTotais, lucroLiquido, proLaboreTotal, lucroLiquidoFinal, proLaborePercent } = calculateKPIs(state.dashboardMonthYearFilter);
             
             const profitNeonFinal = lucroLiquidoFinal >= 0 ? 'neon-text' : 'text-red-500';
@@ -1036,7 +1497,7 @@
             tabEl.innerHTML = `
                 <h2 class="text-3xl font-bold mb-8 neon-text">Resumo Geral e Análise Financeira</h2>
 
-                <!-- NOVO: Controles de Filtro para Dashboard -->
+                <!-- Controles de Filtro para Dashboard -->
                 <div class="flex flex-col sm:flex-row gap-4 mb-8 card p-4 rounded-xl border border-[#333]">
                     <div class="w-full sm:w-1/2">
                         <label for="dashboard-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar Resumo por Mês/Ano</label>
@@ -1126,15 +1587,22 @@
             if (tabName === 'despesas') renderDespesas();
             if (tabName === 'prolabore') renderProLabore();
             if (tabName === 'notasemitidas') renderNotasEmitidas();
+            if (tabName === 'comprovantes') renderComprovantes(); // NOVO
             if (tabName === 'estoque') renderEstoque();
             if (tabName === 'das') renderDas();
             if (tabName === 'dashboard') renderDashboard();
             
+            // O FAB só é escondido para as abas Dashboard e Estoque
             if (tabName === 'dashboard' || tabName === 'estoque') {
                 fabButton.classList.add('hidden');
             } else {
                 fabButton.classList.remove('hidden');
             }
+            
+            // Otimização para garantir que o FAB clique no modal correto
+             if (tabName !== 'dashboard' && tabName !== 'estoque') {
+                 fabButton.onclick = () => window.openEntryModal(tabName);
+             }
         };
 
         const setupEventListeners = () => {
@@ -1145,18 +1613,24 @@
                 });
             });
             
+            // Configuração inicial do FAB (vai ser sobrescrito pelo render)
             if (fabButton) {
                 fabButton.addEventListener('click', () => {
+                    // Usar a aba ativa para determinar qual modal abrir
                     window.openEntryModal(state.activeTab);
                 });
             }
             
+            // Exposição de funções globais (necessário no ambiente Canvas)
             window.deleteDocument = deleteDocument;
             window.handleSearchFilter = handleSearchFilter;
             window.clearMonthFilter = clearMonthFilter;
             window.changeGranularity = changeGranularity;
-            window.deleteDocument = deleteDocument; 
             window.closeModal = closeModal;
+            window.handleFileUpload = handleFileUpload; 
+            window.openEntryModal = openEntryModal; 
+            window.openEditModal = openEditModal; // NOVO: Edição
+            window.openLinkedComprovante = openLinkedComprovante; 
             
             // Handlers de filtro do Dashboard
             window.handleDashboardMonthFilter = (value) => {
@@ -1179,6 +1653,7 @@
             
             let headers, dataKeys, valueColumns;
 
+            // Define cabeçalhos e chaves para a renderização da tabela (mantido)
             if (collectionName === 'faturamento') {
                 headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
                 dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
@@ -1209,7 +1684,6 @@
         const clearMonthFilter = (collectionName) => {
             const monthYearInput = document.getElementById(`${collectionName}-month-year`);
             if (monthYearInput) monthYearInput.value = '';
-            // Determine a chave de data correta para o filtro de pesquisa
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
             handleSearchFilter(collectionName, dateKey);
         };
