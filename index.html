@@ -1043,6 +1043,1017 @@
 
     </script>
 </body>
+</html>
+
+            border-bottom: 3px solid var(--neon-green);
+            color: var(--neon-green);
+            text-shadow: 0 0 3px rgba(0, 255, 136, 0.4);
+        }
+        .card {
+            background-color: var(--dark-card);
+        }
+        /* Custom scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #222; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #666; }
+
+        /* Estilo do Modal/Overlay */
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body class="min-h-screen antialiased">
+
+    <!-- Header and User Info -->
+    <header class="card p-4 shadow-xl mb-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            <h1 class="text-2xl font-bold neon-text">MEI Controle (Acesso Público)</h1>
+            <div id="auth-status" class="text-xs mt-2 sm:mt-0 opacity-70">
+                <!-- Informação de autenticação removida. Dados são globais. -->
+                <p>Status: Conectado ao Painel Global.</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="sticky top-0 z-10 card shadow-lg">
+        <div class="flex overflow-x-auto custom-scrollbar">
+            <button data-tab="faturamento" class="tab-button tab-active px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-trend-up mr-2"></i>Faturamento
+            </button>
+            <button data-tab="despesas" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-trend-down mr-2"></i>Despesas
+            </button>
+            <button data-tab="estoque" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-box mr-2"></i>Estoque
+            </button>
+            <button data-tab="das" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-receipt-magnifying-glass mr-2"></i>Resumo DAS
+            </button>
+            <button data-tab="dashboard" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
+                <i class="ph-bold ph-gauge mr-2"></i>Resumo Geral
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="p-4 sm:p-6">
+        <div id="content-container">
+            <!-- Tab content will be rendered here -->
+            <div id="faturamento" class="tab-content" style="display: none;"></div>
+            <div id="despesas" class="tab-content" style="display: none;"></div>
+            <div id="estoque" class="tab-content" style="display: none;"></div>
+            <div id="das" class="tab-content" style="display: none;"></div>
+            <div id="dashboard" class="tab-content" style="display: none;"></div>
+        </div>
+    </main>
+    
+    <!-- Floating Action Button (FAB) -->
+    <button id="fab-button" 
+            class="fixed bottom-6 right-6 z-30 w-16 h-16 rounded-full bg-[#00ff88] text-2xl text-[#121212] font-bold shadow-2xl transition duration-300 hover:scale-105 active:scale-90 neon-glow touch-action-manipulation"
+            aria-label="Adicionar Novo Item">
+        <i class="ph-bold ph-plus"></i>
+    </button>
+    
+    <!-- Modal Container for Forms -->
+    <div id="entry-modal" class="modal-overlay fixed inset-0 z-40 hidden flex items-center justify-center p-4 transition-opacity duration-300 opacity-0" onclick="if(event.target.id === 'entry-modal') closeModal()">
+        <div class="card w-full max-w-lg lg:max-w-3xl p-6 rounded-xl shadow-2xl transform translate-y-4 opacity-0 transition-all duration-300" id="modal-content">
+            <div class="flex justify-between items-center mb-4 border-b pb-2 border-[#333]">
+                <h3 class="text-xl font-semibold neon-text" id="modal-title">Novo Registro</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-white p-2 rounded-full hover:bg-[#2a2a2a] active:scale-95 touch-action-manipulation" aria-label="Fechar Modal">
+                    <i class="ph-bold ph-x text-xl"></i>
+                </button>
+            </div>
+            <div id="modal-form-container">
+                <!-- Form will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50"></div>
+
+    <!-- Firebase and Application Logic -->
+    <script type="module">
+        // =================================================================
+        // FIREBASE IMPORTS
+        // =================================================================
+        // REMOVEMOS: getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken
+        import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // Importa apenas Firestore
+        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- CONFIGURAÇÃO INICIAL E VARIÁVEIS GLOBAIS ---
+        
+        // =================================================================
+        // CONFIGURAÇÃO DO FIREBASE: Prioriza variáveis do Canvas, usa Fallback
+        // =================================================================
+        
+        // 1. Variáveis de ambiente do Canvas (existem apenas aqui)
+        const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : null;
+        const canvasFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        // initialAuthToken não é mais necessário
+        // const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // 2. Configuração de Fallback (para rodar fora do Canvas, como no GitHub Pages)
+        const fallbackFirebaseConfig = {
+            apiKey: "AIzaSyBI7Zecb-2tn3zUAAhiO5UmtTGcAALUiKg",
+            authDomain: "vitrine-913c6.firebaseapp.com",
+            projectId: "vitrine-913c6",
+            storageBucket: "vitrine-913c6.firebasestorage.app",
+            messagingSenderId: "1088927815489",
+            appId: "1:1088927815489:web:61d745609fbf4c8b9e73c0",
+            measurementId: "G-ZLNVWY16CJ" 
+        };
+
+        // 3. Escolhe a configuração
+        const firebaseConfig = canvasFirebaseConfig || fallbackFirebaseConfig;
+        const appId = canvasAppId || firebaseConfig.projectId; 
+        
+        let app, db; // Auth service removido
+        
+        // Variável de controle de Auth removida. Assume-se que está pronto.
+        const isAppReady = true; 
+        
+        // Estado da Aplicação (Dados e UI)
+        window.state = {
+            faturamento: [],
+            despesas: [],
+            estoque: [],
+            das: [],
+            activeTab: 'faturamento',
+            dashboardGranularity: 'month',
+        };
+
+        // UI Element References
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const toastContainer = document.getElementById('toast-container');
+        const entryModal = document.getElementById('entry-modal');
+        const modalContent = document.getElementById('modal-content');
+        const modalTitle = document.getElementById('modal-title');
+        const modalFormContainer = document.getElementById('modal-form-container');
+        const fabButton = document.getElementById('fab-button');
+
+        setLogLevel('debug'); // Ativa logs do Firestore para ajudar na depuração.
+
+        // --- UTILITIES E HELPERS ---
+
+        // Caminho da coleção AGORA É PÚBLICO E COMPARTILHADO
+        const getCollectionPath = (collectionName) => {
+            // Caminho PÚBLICO: artifacts/{appId}/public/data/{collectionName}
+            return `artifacts/${appId}/public/data/${collectionName}`;
+        };
+
+        const formatCurrency = (amount) => {
+            return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
+        };
+
+        const showToast = (message, type = 'success') => {
+            const colors = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            const icon = type === 'success' ? 'ph-check-circle' : 'ph-x-circle';
+            
+            const toast = document.createElement('div');
+            toast.className = `p-3 mb-2 rounded-lg shadow-xl text-white ${colors} transition-all duration-300 transform translate-y-full opacity-0`;
+            toast.innerHTML = `<i class="ph-bold ${icon} mr-2"></i>${message}`;
+            
+            toastContainer.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-full', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-full', 'opacity-0');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, 5000);
+        };
+
+        const filterAndSortData = (data, search, monthYear) => {
+            let filtered = [...data];
+            if (monthYear) {
+                const [year, month] = monthYear.split('-').map(Number);
+                filtered = filtered.filter(item => {
+                    const dateString = item.data || item.pagoEm;
+                    if (!dateString) return false;
+                    
+                    const date = new Date(dateString);
+                    const safeDate = new Date(date.getTime() + (24 * 60 * 60 * 1000));
+                    return safeDate.getFullYear() === year && (safeDate.getMonth() + 1) === month;
+                });
+            }
+            if (search) {
+                const lowerSearch = search.toLowerCase();
+                filtered = filtered.filter(item => 
+                    Object.values(item).some(value => 
+                        String(value).toLowerCase().includes(lowerSearch)
+                    )
+                );
+            }
+            filtered.sort((a, b) => new Date(b.data || b.pagoEm || 0) - new Date(a.data || a.pagoEm || 0));
+            return filtered;
+        };
+
+        // --- FIREBASE INICIALIZAÇÃO E LISTENERS ---
+
+        const initializeFirebase = async () => {
+            try {
+                // VERIFICAÇÃO CRÍTICA: Impedir a inicialização dupla do App Firebase
+                if (getApps().length === 0) {
+                    app = initializeApp(firebaseConfig);
+                } else {
+                    app = getApp(); // Usa a instância existente
+                }
+                
+                // Inicializa apenas o Firestore
+                db = getFirestore(app);
+                
+                // Como não há Auth, chamamos os listeners diretamente
+                setupFirestoreListeners();
+                render('dashboard');
+
+            } catch (error) {
+                console.error("Erro na inicialização do Firebase:", error);
+                showToast(`Erro Crítico na conexão: ${error.message}`, 'error');
+            }
+        };
+
+        // FUNÇÃO CRÍTICA: Escuta em tempo real (onSnapshot)
+        const setupFirestoreListeners = () => {
+            if (!db) {
+                console.warn("Firestore não está pronto.");
+                return;
+            }
+            
+            // Faturamento
+            onSnapshot(collection(db, getCollectionPath('faturamento')), (snapshot) => {
+                state.faturamento = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (state.activeTab === 'faturamento' || state.activeTab === 'dashboard') render(state.activeTab);
+            }, (error) => console.error("Erro no listener de Faturamento:", error));
+
+            // Despesas
+            onSnapshot(collection(db, getCollectionPath('despesas')), (snapshot) => {
+                state.despesas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (state.activeTab === 'despesas' || state.activeTab === 'dashboard') render(state.activeTab);
+            }, (error) => console.error("Erro no listener de Despesas:", error));
+
+            // Estoque
+            onSnapshot(collection(db, getCollectionPath('estoque')), (snapshot) => {
+                state.estoque = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (state.activeTab === 'estoque') render('estoque');
+            }, (error) => console.error("Erro no listener de Estoque:", error));
+            
+            // DAS
+            onSnapshot(collection(db, getCollectionPath('das')), (snapshot) => {
+                state.das = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (state.activeTab === 'das') render('das');
+            }, (error) => console.error("Erro no listener de DAS:", error));
+        };
+
+        // --- OPERAÇÕES CRUD DO FIRESTORE (Adicionar e Deletar) ---
+
+        const saveDocument = async (collectionName, data, id = null) => {
+            if (!isAppReady) { // isAppReady é sempre true agora
+                showToast('Erro: Aplicação Firebase não pronta.', 'error');
+                return;
+            }
+
+            const collectionPath = getCollectionPath(collectionName);
+            if (!collectionPath) {
+                showToast('Erro: Caminho da coleção inválido.', 'error');
+                return;
+            }
+
+            try {
+                if (id) {
+                    await setDoc(doc(db, collectionPath, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+                    showToast(`Item ${collectionName} atualizado com sucesso!`);
+                } else {
+                    await addDoc(collection(db, collectionPath), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                    showToast(`Novo item ${collectionName} adicionado!`);
+                }
+                window.closeModal(); // Fecha o modal após salvar
+            } catch (error) {
+                console.error(`Erro ao salvar em ${collectionName}:`, error);
+                // AVISO: AVISAR que o erro pode ser nas regras de segurança do Firestore
+                showToast(`Erro ao salvar: ${error.message}. Verifique as Regras de Segurança do Firestore!`, 'error');
+            }
+        };
+
+        const deleteDocument = async (collectionName, id) => {
+            if (!isAppReady) {
+                showToast('Erro: Aplicação Firebase não pronta.', 'error');
+                return;
+            }
+            
+            const collectionPath = getCollectionPath(collectionName);
+            if (!collectionPath) {
+                showToast('Erro: Caminho da coleção inválido.', 'error');
+                return;
+            }
+
+            try {
+                await deleteDoc(doc(db, collectionPath, id));
+                showToast('Item excluído com sucesso!', 'success');
+            } catch (error) {
+                console.error(`Erro ao deletar em ${collectionName}:`, error);
+                showToast(`Erro ao deletar: ${error.message}. Verifique as Regras de Segurança do Firestore!`, 'error');
+            }
+        };
+        
+        // --- FUNÇÕES MODAL E FAB ---
+
+        window.openEntryModal = (collectionName) => {
+            let title = '';
+            let formHtml = '';
+            
+            switch(collectionName) {
+                case 'faturamento':
+                    title = 'Nova Venda/Receita';
+                    formHtml = getFaturamentoFormHTML();
+                    break;
+                case 'despesas':
+                    title = 'Nova Despesa';
+                    formHtml = getDespesasFormHTML();
+                    break;
+                case 'estoque':
+                    title = 'Novo Item de Estoque';
+                    formHtml = getEstoqueFormHTML();
+                    break;
+                case 'das':
+                    title = 'Registro de Pagamento DAS';
+                    formHtml = getDasFormHTML();
+                    break;
+                default:
+                    showToast('Funcionalidade de adição não disponível para esta aba.', 'error');
+                    return;
+            }
+
+            modalTitle.textContent = title;
+            modalFormContainer.innerHTML = formHtml;
+            
+            if (collectionName === 'faturamento') document.getElementById('modal-form').onsubmit = handleFaturamentoSubmit;
+            if (collectionName === 'despesas') document.getElementById('modal-form').onsubmit = handleDespesasSubmit;
+            if (collectionName === 'estoque') document.getElementById('modal-form').onsubmit = handleEstoqueSubmit;
+            if (collectionName === 'das') document.getElementById('modal-form').onsubmit = handleDasSubmit;
+
+            const today = new Date().toISOString().split('T')[0];
+            document.querySelectorAll('#modal-form input[type="date"]').forEach(input => input.value = today);
+
+            entryModal.classList.remove('hidden');
+            setTimeout(() => {
+                entryModal.classList.remove('opacity-0');
+                modalContent.classList.remove('translate-y-4', 'opacity-0');
+            }, 10);
+        };
+
+        window.closeModal = () => {
+            modalContent.classList.add('translate-y-4', 'opacity-0');
+            entryModal.classList.add('opacity-0');
+            entryModal.addEventListener('transitionend', () => {
+                entryModal.classList.add('hidden');
+                modalFormContainer.innerHTML = '';
+            }, { once: true });
+        };
+        
+        // --- RENDERIZAÇÃO DE FORMULÁRIOS (HTML retornado) ---
+
+        const getInputClasses = () => 'p-3 rounded-lg bg-[#2a2a2a] border border-[#333] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm w-full';
+        
+        const getSubmitButton = (label, icon) => `
+            <button type="submit" class="w-full mt-6 px-6 py-3 bg-[#00ff88] text-lg text-black font-bold rounded-xl hover:bg-opacity-90 transition active:scale-95 neon-glow touch-action-manipulation">
+                <i class="ph-bold ${icon} mr-2"></i>${label}
+            </button>
+        `;
+
+        const getFaturamentoFormHTML = () => `
+            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="fat-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Venda</label>
+                    <input type="date" name="data" id="fat-data" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="fat-cliente" class="block text-sm font-medium text-gray-400 mb-1">Cliente (Opcional)</label>
+                    <input type="text" name="cliente" id="fat-cliente" placeholder="Nome ou Referência" class="${getInputClasses()}">
+                </div>
+                <div class="col-span-full">
+                    <label for="fat-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição do Item/Serviço</label>
+                    <input type="text" name="descricao" id="fat-descricao" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="fat-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
+                    <select name="pagamento" id="fat-pagamento" class="${getInputClasses()}">
+                        <option value="Cartão">Cartão</option>
+                        <option value="Pix">Pix</option>
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Boleto">Boleto</option>
+                        <option value="Outro">Outro</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="fat-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Venda (R$)</label>
+                    <input type="number" step="0.01" name="valor" id="fat-valor" placeholder="100.00" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="fat-custo" class="block text-sm font-medium text-gray-400 mb-1">Custo do Item/Serviço (R$)</label>
+                    <input type="number" step="0.01" name="custo" id="fat-custo" placeholder="0.00" value="0.00" class="${getInputClasses()}">
+                </div>
+                ${getSubmitButton('Salvar Venda', 'ph-plus-circle')}
+            </form>
+        `;
+
+        const getDespesasFormHTML = () => `
+            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="des-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Despesa</label>
+                    <input type="date" name="data" id="des-data" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="des-tipo" class="block text-sm font-medium text-gray-400 mb-1">Tipo de Despesa</label>
+                    <select name="tipo" id="des-tipo" class="${getInputClasses()}">
+                        <option value="Aluguel">Aluguel</option>
+                        <option value="Serviços">Serviços</option>
+                        <option value="Marketing">Marketing</option>
+                        <option value="Impostos">Impostos (Gerais)</option>
+                        <option value="Contabilidade">Contabilidade</option>
+                        <option value="Outros">Outros</option>
+                    </select>
+                </div>
+                <div class="col-span-full">
+                    <label for="des-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição da Despesa</label>
+                    <input type="text" name="descricao" id="des-descricao" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="des-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
+                    <select name="pagamento" id="des-pagamento" class="${getInputClasses()}">
+                        <option value="Cartão">Cartão</option>
+                        <option value="Pix">Pix</option>
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Boleto">Boleto</option>
+                        <option value="Transferência">Transferência</option>
+                        <option value="Outro">Outro</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="des-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor (R$)</label>
+                    <input type="number" step="0.01" name="valor" id="des-valor" placeholder="50.00" required class="${getInputClasses()}">
+                </div>
+                ${getSubmitButton('Salvar Despesa', 'ph-trend-down')}
+            </form>
+        `;
+
+        const getEstoqueFormHTML = () => `
+            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="col-span-full">
+                    <label for="est-item" class="block text-sm font-medium text-gray-400 mb-1">Nome do Item</label>
+                    <input type="text" name="item" id="est-item" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="est-quantidade" class="block text-sm font-medium text-gray-400 mb-1">Quantidade Atual</label>
+                    <input type="number" name="quantidade" id="est-quantidade" placeholder="Ex: 10" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="est-custounitario" class="block text-sm font-medium text-gray-400 mb-1">Custo Unitário (R$)</label>
+                    <input type="number" step="0.01" name="custoUnitario" id="est-custounitario" placeholder="Ex: 15.50" required class="${getInputClasses()}">
+                </div>
+                ${getSubmitButton('Adicionar/Atualizar Estoque', 'ph-box-add')}
+            </form>
+        `;
+
+        const getDasFormHTML = () => `
+            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label for="das-mes" class="block text-sm font-medium text-gray-400 mb-1">Mês de Referência</label>
+                    <input type="month" name="mesReferencia" id="das-mes" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="das-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor DAS Pago (R$)</label>
+                    <input type="number" step="0.01" name="valorDas" id="das-valor" required class="${getInputClasses()}">
+                </div>
+                <div>
+                    <label for="das-pagoem" class="block text-sm font-medium text-gray-400 mb-1">Data de Pagamento</label>
+                    <input type="date" name="pagoEm" id="das-pagoem" required class="${getInputClasses()}">
+                </div>
+                ${getSubmitButton('Registrar Pagamento DAS', 'ph-wallet')}
+            </form>
+        `;
+
+        // --- SUBMIT HANDLERS ---
+
+        const handleFaturamentoSubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const valor = parseFloat(form.valor.value);
+            const custo = parseFloat(form.custo.value || 0);
+            const lucro = valor - custo;
+
+            const newEntry = {
+                data: form.data.value,
+                cliente: form.cliente.value || 'N/A',
+                descricao: form.descricao.value,
+                pagamento: form.pagamento.value,
+                valor: valor,
+                custo: custo,
+                lucro: lucro,
+            };
+            saveDocument('faturamento', newEntry);
+        };
+
+        const handleDespesasSubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const newEntry = {
+                data: form.data.value,
+                tipo: form.tipo.value,
+                descricao: form.descricao.value,
+                pagamento: form.pagamento.value,
+                valor: parseFloat(form.valor.value),
+            };
+            saveDocument('despesas', newEntry);
+        };
+
+        const handleEstoqueSubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const quantidade = parseFloat(form.quantidade.value);
+            const custoUnitario = parseFloat(form.custoUnitario.value);
+            const total = quantidade * custoUnitario;
+
+            const newItem = {
+                item: form.item.value,
+                quantidade: quantidade,
+                custoUnitario: custoUnitario,
+                total: total,
+            };
+            
+            // Tenta encontrar item existente pelo nome
+            const existingItem = state.estoque.find(i => i.item && i.item.toLowerCase() === newItem.item.toLowerCase());
+            saveDocument('estoque', newItem, existingItem ? existingItem.id : null);
+        };
+
+        const handleDasSubmit = (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const newEntry = {
+                mesReferencia: form.mesReferencia.value,
+                valorDas: parseFloat(form.valorDas.value),
+                pagoEm: form.pagoEm.value,
+            };
+            const existingItem = state.das.find(i => i.mesReferencia === newEntry.mesReferencia);
+            saveDocument('das', newEntry, existingItem ? existingItem.id : null);
+        };
+        
+        // --- RENDERIZAÇÃO DE TABELAS REUTILIZÁVEIS ---
+
+        const renderControls = (collectionName) => {
+            return `
+                <div class="flex flex-col sm:flex-row gap-4 mb-6 card p-4 rounded-xl border border-[#333]">
+                    <!-- Busca Rápida -->
+                    <div class="flex-grow">
+                        <label for="${collectionName}-search" class="block text-sm font-medium text-gray-400 mb-1">Busca Rápida</label>
+                        <input type="text" id="${collectionName}-search" placeholder="Buscar por descrição, cliente, etc." 
+                               class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                               oninput="handleSearchFilter('${collectionName}')">
+                    </div>
+                    <!-- Filtro por Mês/Ano -->
+                    <div class="w-full sm:w-auto">
+                        <label for="${collectionName}-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar por Mês/Ano</label>
+                        <input type="month" id="${collectionName}-month-year" value=""
+                               class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                               onchange="handleSearchFilter('${collectionName}')">
+                        <button onclick="clearMonthFilter('${collectionName}')" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Filtro</button>
+                    </div>
+                </div>
+            `;
+        };
+
+        const createTableHTML = (collectionName, data, headers, dataKeys, valueColumns = []) => {
+            const filteredData = (collectionName === 'faturamento' || collectionName === 'despesas' || collectionName === 'das') ? 
+                filterAndSortData(data, 
+                    document.getElementById(`${collectionName}-search`)?.value,
+                    document.getElementById(`${collectionName}-month-year`)?.value
+                ) : data;
+
+            if (filteredData.length === 0) {
+                return `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum registro encontrado.</div>`;
+            }
+
+            const headerHTML = headers.map(h => `<th class="p-3 text-left font-medium">${h}</th>`).join('');
+            
+            const rowsHTML = filteredData.map(item => {
+                const cellHTML = dataKeys.map(key => {
+                    let value = item[key];
+                    if (key.endsWith('data') || key.endsWith('Data') || key.endsWith('pagoEm')) {
+                        // Converte a string de data (YYYY-MM-DD) para o formato brasileiro
+                        value = item[key] ? new Date(item[key] + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
+                    } else if (valueColumns.includes(key)) {
+                        value = formatCurrency(parseFloat(value || 0));
+                    }
+                    return `<td class="p-3 border-t border-[#333]">${value}</td>`;
+                }).join('');
+
+                const actionsHTML = `
+                    <td class="p-3 border-t border-[#333] text-right">
+                        <button onclick="deleteDocument('${collectionName}', '${item.id}')" 
+                                class="text-red-500 hover:text-red-400 p-1 rounded-full hover:bg-[#333] transition active:scale-95 touch-action-manipulation"
+                                aria-label="Excluir item">
+                            <i class="ph-bold ph-trash text-lg"></i>
+                        </button>
+                    </td>
+                `;
+
+                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${actionsHTML}</tr>`;
+            }).join('');
+            
+            let totalRowHTML = '';
+            if (collectionName === 'faturamento') {
+                const totalFaturamento = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                const totalCusto = filteredData.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
+                const totalLucro = totalFaturamento - totalCusto;
+                totalRowHTML = `
+                    <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
+                        <td class="p-3 text-white" colspan="${dataKeys.length - 3}">TOTAIS NO PERÍODO:</td>
+                        <td class="p-3 neon-text">${formatCurrency(totalFaturamento)}</td>
+                        <td class="p-3 text-red-400">${formatCurrency(totalCusto)}</td>
+                        <td class="p-3 ${totalLucro >= 0 ? 'neon-text' : 'text-red-400'}">${formatCurrency(totalLucro)}</td>
+                        <td class="p-3"></td>
+                    </tr>
+                `;
+            } else if (collectionName === 'despesas') {
+                const totalDespesas = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                totalRowHTML = `
+                    <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
+                        <td class="p-3 text-white" colspan="${dataKeys.length - 1}">TOTAL DE DESPESAS NO PERÍODO:</td>
+                        <td class="p-3 text-red-400">${formatCurrency(totalDespesas)}</td>
+                        <td class="p-3"></td>
+                    </tr>
+                `;
+            }
+
+            return `
+                <div class="overflow-x-auto custom-scrollbar shadow-lg rounded-xl card mb-6 border border-[#333]">
+                    <table class="min-w-full table-auto text-sm">
+                        <thead class="bg-[#282828]">
+                            <tr>${headerHTML}<th class="p-3 text-right font-medium">Ações</th></tr>
+                        </thead>
+                        <tbody>
+                            ${totalRowHTML}
+                            ${rowsHTML}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        };
+        
+        // --- RENDERIZAÇÃO DAS ABAS ---
+
+        const renderFaturamento = () => {
+            const tabEl = document.getElementById('faturamento');
+            const data = state.faturamento;
+            const headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
+            const dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
+            const valueColumns = ["valor", "custo", "lucro"];
+
+            tabEl.innerHTML = `
+                <h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Faturamento (Vendas e Receitas)</h2>
+                ${renderControls('faturamento')}
+                <h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Transações</h3>
+                <div id="faturamento-table-container">
+                    ${createTableHTML('faturamento', data, headers, dataKeys, valueColumns)}
+                </div>
+            `;
+        };
+
+        const renderDespesas = () => {
+            const tabEl = document.getElementById('despesas');
+            const data = state.despesas;
+            const headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"];
+            const dataKeys = ["data", "tipo", "descricao", "pagamento", "valor"];
+            const valueColumns = ["valor"];
+
+            tabEl.innerHTML = `
+                <h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Despesas Operacionais</h2>
+                ${renderControls('despesas')}
+                <h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Despesas</h3>
+                <div id="despesas-table-container">
+                    ${createTableHTML('despesas', data, headers, dataKeys, valueColumns)}
+                </div>
+            `;
+        };
+
+        const renderEstoque = () => {
+            const tabEl = document.getElementById('estoque');
+            const data = state.estoque;
+            const headers = ["Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)"];
+            const dataKeys = ["item", "quantidade", "custoUnitario", "total"];
+            const valueColumns = ["custoUnitario", "total"];
+            
+            const totalEstoqueValor = data.reduce((sum, item) => sum + parseFloat(item.total || 0), 0);
+
+            tabEl.innerHTML = `
+                <h2 class="text-2xl font-semibold mb-6 neon-text">Controle de Estoque</h2>
+                <!-- KPI do Estoque -->
+                <div class="card p-4 mb-6 rounded-xl text-center border border-[#333]">
+                    <p class="text-sm font-medium text-gray-400">Valor Total do Estoque:</p>
+                    <p class="text-3xl font-bold mt-1 neon-text">${formatCurrency(totalEstoqueValor)}</p>
+                </div>
+                <h3 class="text-xl font-semibold mb-3 neon-text">Inventário Atual</h3>
+                <div id="estoque-table-container">
+                    ${createTableHTML('estoque', data, headers, dataKeys, valueColumns)}
+                </div>
+            `;
+        };
+
+        const renderDas = () => {
+            const tabEl = document.getElementById('das');
+            const data = state.das;
+            const headers = ["Mês de Referência", "Valor DAS (R$)", "Pago em"];
+            const dataKeys = ["mesReferencia", "valorDas", "pagoEm"];
+            const valueColumns = ["valorDas"];
+
+            tabEl.innerHTML = `
+                <h2 class="text-2xl font-semibold mb-6 neon-text">Acompanhamento da Guia DAS (MEI)</h2>
+                ${renderControls('das')}
+                <h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Pagamentos DAS</h3>
+                <div id="das-table-container">
+                    ${createTableHTML('das', data, headers, dataKeys, valueColumns)}
+                </div>
+            `;
+        };
+
+        // --- DASHBOARD AND CHART LOGIC ---
+        
+        const calculateKPIs = () => {
+            const faturamentoTotal = state.faturamento.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+            const despesasOperacionais = state.despesas.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+            const custosFaturamento = state.faturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
+            
+            const despesasTotais = despesasOperacionais + custosFaturamento;
+            const lucroLiquido = faturamentoTotal - despesasTotais;
+            
+            return { faturamentoTotal, despesasTotais, lucroLiquido };
+        };
+
+        let chartInstance = null;
+        
+        const renderChart = () => {
+            const canvas = document.getElementById('analyticsChart');
+            if (!canvas) return;
+
+            const granularity = state.dashboardGranularity;
+            const aggregated = {};
+
+            const getGroupKey = (dateStr) => {
+                const date = new Date(dateStr + 'T00:00:00'); // Adiciona T00:00:00 para evitar fuso horário
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                if (granularity === 'year') return String(year);
+                if (granularity === 'month') return `${year}-${month}`;
+                return `${year}-${month}-${day}`;
+            };
+            
+            // Faturamento e seus custos
+            state.faturamento.forEach(item => {
+                const key = getGroupKey(item.data);
+                if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0 };
+                aggregated[key].faturamento += parseFloat(item.valor || 0);
+                aggregated[key].despesas += parseFloat(item.custo || 0); // Custos de faturamento
+            });
+
+            // Despesas Operacionais
+            state.despesas.forEach(item => {
+                const key = getGroupKey(item.data);
+                if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0 };
+                aggregated[key].despesas += parseFloat(item.valor || 0); // Despesas operacionais
+            });
+            
+            const sortedKeys = Object.keys(aggregated).sort();
+
+            const labels = sortedKeys.map(key => {
+                if (granularity === 'year') return key;
+                if (granularity === 'month') return new Date(key + '-01').toLocaleDateString('pt-BR', { year: 'numeric', month: 'short' });
+                return new Date(key).toLocaleDateString('pt-BR');
+            });
+            
+            const faturamentoData = sortedKeys.map(key => aggregated[key].faturamento);
+            const despesasData = sortedKeys.map(key => aggregated[key].despesas);
+            
+            const chartData = {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Faturamento',
+                        data: faturamentoData,
+                        backgroundColor: 'rgba(0, 255, 136, 0.7)',
+                        borderColor: 'var(--neon-green)',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Despesas Totais',
+                        data: despesasData,
+                        backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                        borderColor: 'rgb(255, 99, 132)',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }
+                ]
+            };
+
+            const chartConfig = {
+                type: 'bar',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#333' },
+                            ticks: { color: 'var(--dark-text)', callback: (value) => formatCurrency(value) }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: 'var(--dark-text)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: 'var(--dark-text)', boxWidth: 12 } },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}`
+                            }
+                        }
+                    }
+                }
+            };
+            
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            const ctx = canvas.getContext('2d');
+            chartInstance = new Chart(ctx, chartConfig);
+        };
+
+        const renderDashboard = () => {
+            const tabEl = document.getElementById('dashboard');
+            const { faturamentoTotal, despesasTotais, lucroLiquido } = calculateKPIs();
+            const profitNeon = lucroLiquido >= 0 ? 'neon-text' : 'text-red-500';
+
+            const granularityOptions = [
+                { value: 'day', label: 'Dia' },
+                { value: 'month', label: 'Mês' },
+                { value: 'year', label: 'Ano' }
+            ];
+            
+            tabEl.innerHTML = `
+                <h2 class="text-3xl font-bold mb-8 neon-text">Resumo Geral e Análise Financeira</h2>
+
+                <!-- KPIs (Key Performance Indicators) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="card p-6 rounded-xl shadow-lg border-b-4 border-[#00ff88]">
+                        <p class="text-sm uppercase text-gray-400 font-medium">Faturamento Total</p>
+                        <p class="text-3xl font-bold mt-2 neon-text">${formatCurrency(faturamentoTotal)}</p>
+                    </div>
+                    <div class="card p-6 rounded-xl shadow-lg border-b-4 border-red-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">Despesas Totais</p>
+                        <p class="text-3xl font-bold mt-2 text-red-500">${formatCurrency(despesasTotais)}</p>
+                    </div>
+                    <div class="card p-6 rounded-xl shadow-lg border-b-4 ${lucroLiquido >= 0 ? 'border-[#00ff88]' : 'border-red-500'}">
+                        <p class="text-sm uppercase text-gray-400 font-medium">Lucro Líquido</p>
+                        <p class="text-3xl font-bold mt-2 ${profitNeon}">${formatCurrency(lucroLiquido)}</p>
+                    </div>
+                </div>
+
+                <!-- Gráfico Analítico -->
+                <div class="card p-6 rounded-xl shadow-lg border border-[#333]">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+                        <h3 class="text-xl font-semibold neon-text">Faturamento vs Despesas (Histórico)</h3>
+                        <!-- Granularidade Selector -->
+                        <div class="flex space-x-2 mt-3 sm:mt-0">
+                            ${granularityOptions.map(opt => `
+                                <button onclick="changeGranularity('${opt.value}')"
+                                    class="px-3 py-1 text-xs font-medium rounded-full transition duration-150 active:scale-95
+                                    ${state.dashboardGranularity === opt.value ? 'bg-[#00ff88] text-[#121212] neon-glow' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#3a3a3a]'}">
+                                    ${opt.label}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div style="height: 400px; width: 100%;">
+                        <canvas id="analyticsChart"></canvas>
+                    </div>
+                </div>
+            `;
+            
+            setTimeout(renderChart, 50);
+        };
+        
+        // --- LÓGICA DE NAVEGAÇÃO E RE-RENDERIZAÇÃO ---
+        
+        const render = (tabName) => {
+            state.activeTab = tabName;
+            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+            tabButtons.forEach(btn => btn.classList.remove('tab-active'));
+
+            const activeContentEl = document.getElementById(tabName);
+            const activeTabBtn = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+
+            if (activeContentEl) activeContentEl.style.display = 'block';
+            if (activeTabBtn) activeTabBtn.classList.add('tab-active');
+
+            if (tabName === 'faturamento') renderFaturamento();
+            if (tabName === 'despesas') renderDespesas();
+            if (tabName === 'estoque') renderEstoque();
+            if (tabName === 'das') renderDas();
+            if (tabName === 'dashboard') renderDashboard();
+            
+            if (tabName === 'dashboard') {
+                fabButton.classList.add('hidden');
+            } else {
+                fabButton.classList.remove('hidden');
+            }
+        };
+
+        const setupEventListeners = () => {
+            tabButtons.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const tabName = e.currentTarget.dataset.tab;
+                    render(tabName);
+                });
+            });
+            
+            if (fabButton) {
+                fabButton.addEventListener('click', () => {
+                    window.openEntryModal(state.activeTab);
+                });
+            }
+            
+            window.deleteDocument = deleteDocument;
+            window.handleSearchFilter = handleSearchFilter;
+            window.clearMonthFilter = clearMonthFilter;
+            window.changeGranularity = changeGranularity;
+            window.deleteDocument = deleteDocument; 
+            window.closeModal = closeModal;
+        };
+
+        const handleSearchFilter = (collectionName) => {
+            const containerId = `${collectionName}-table-container`;
+            const containerEl = document.getElementById(containerId);
+            if (!containerEl) return;
+
+            const search = document.getElementById(`${collectionName}-search`)?.value;
+            const monthYear = document.getElementById(`${collectionName}-month-year`)?.value;
+            
+            const data = state[collectionName];
+            
+            let headers, dataKeys, valueColumns;
+
+            if (collectionName === 'faturamento') {
+                headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
+                dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
+                valueColumns = ["valor", "custo", "lucro"];
+            } else if (collectionName === 'despesas') {
+                headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"];
+                dataKeys = ["data", "tipo", "descricao", "pagamento", "valor"];
+                valueColumns = ["valor"];
+            } else if (collectionName === 'das') {
+                headers = ["Mês de Referência", "Valor DAS (R$)", "Pago em"];
+                dataKeys = ["mesReferencia", "valorDas", "pagoEm"];
+                valueColumns = ["valorDas"];
+            } else {
+                return; // Estoque não usa este filtro
+            }
+
+            containerEl.innerHTML = createTableHTML(collectionName, data, headers, dataKeys, valueColumns);
+        };
+
+        const clearMonthFilter = (collectionName) => {
+            const monthYearInput = document.getElementById(`${collectionName}-month-year`);
+            if (monthYearInput) monthYearInput.value = '';
+            handleSearchFilter(collectionName);
+        };
+        
+        const changeGranularity = (granularity) => {
+            state.dashboardGranularity = granularity;
+            renderDashboard();
+        };
+
+        // --- INICIALIZAÇÃO ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeFirebase();
+            setupEventListeners();
+        });
+
+    </script>
+</body>
 </html>        }
         .neon-text {
             color: var(--neon-green);
