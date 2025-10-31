@@ -11,6 +11,11 @@
     <!-- Phosphor Icons for ICONS -->
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
     
+    <!-- PDF Export Libraries (NOVO) -->
+    <!-- REMOVIDO html2canvas, ADICIONADO jspdf-autotable para tabelas profissionais -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    
     <style>
         /* Custom Neon Green Theme and Improved Contrast */
         :root {
@@ -167,8 +172,7 @@
         import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        // NOVO: Firebase Storage Imports
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // --- CONFIGURAÇÃO INICIAL E VARIÁVEIS GLOBAIS ---
         
@@ -193,8 +197,8 @@
         const firebaseConfig = canvasFirebaseConfig || fallbackFirebaseConfig;
         const appId = canvasAppId || firebaseConfig.projectId; 
         
-        let app, db, auth, storage; // NOVO: 'storage'
-        let userId = null; // NOVO: para uso no Storage
+        let app, db, auth, storage; // 'storage' inicializado
+        let userId = null; 
         const isAppReady = true; 
         
         // Estado da Aplicação (Dados e UI)
@@ -203,7 +207,7 @@
             despesas: [],
             prolabore: [], 
             notasemitidas: [],
-            comprovantes: [], // NOVO: Coleção de comprovantes
+            comprovantes: [], // Coleção de comprovantes
             estoque: [],
             das: [],
             activeTab: 'faturamento',
@@ -365,7 +369,7 @@
                 
                 db = getFirestore(app);
                 auth = getAuth(app);
-                storage = getStorage(app); // NOVO: Inicializa Storage
+                storage = getStorage(app); // Inicializa Storage
 
                 // Tenta autenticar
                 if (initialAuthToken) {
@@ -424,7 +428,7 @@
                 if (['notasemitidas'].includes(state.activeTab)) render('notasemitidas');
             }, (error) => console.error("Erro no listener de Notas Emitidas:", error));
 
-            // NOVO: Comprovantes (Atualiza todas as abas que usam dados de link)
+            // Comprovantes (Atualiza todas as abas que usam dados de link)
             onSnapshot(collection(db, getCollectionPath('comprovantes')), (snapshot) => {
                 state.comprovantes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 if (['comprovantes', 'faturamento', 'despesas'].includes(state.activeTab)) render(state.activeTab);
@@ -832,6 +836,7 @@
                 if (newComprovanteId !== oldComprovanteId) {
                     await updateDocumentComprovanteLink(newComprovanteId, `faturamento:${savedDocId}`, oldComprovanteId);
                 }
+                window.closeModal();
             }
         };
 
@@ -856,6 +861,7 @@
                 if (newComprovanteId !== oldComprovanteId) {
                     await updateDocumentComprovanteLink(newComprovanteId, `despesas:${savedDocId}`, oldComprovanteId);
                 }
+                window.closeModal();
             }
         };
         
@@ -868,7 +874,7 @@
             const newEntry = {
                 data: form.data.value, descricao: form.descricao.value, valor: parseFloat(form.valor.value),
             };
-            saveDocument('prolabore', newEntry, id);
+            saveDocument('prolabore', newEntry, id).then(() => window.closeModal());
         };
         
         // MODIFICADO: Inclui tratamento para ID
@@ -881,7 +887,7 @@
                 dataEmissao: form.dataEmissao.value, numeroNF: form.numeroNF.value, cliente: form.cliente.value,
                 valor: parseFloat(form.valor.value), descricao: form.descricao.value,
             };
-            saveDocument('notasemitidas', newEntry, id);
+            saveDocument('notasemitidas', newEntry, id).then(() => window.closeModal());
         };
 
         // MODIFICADO: Inclui tratamento para ID
@@ -899,10 +905,10 @@
             
             // Lógica de update/insert baseada no ID ou no nome do item
             if (id) {
-                saveDocument('estoque', newItem, id);
+                saveDocument('estoque', newItem, id).then(() => window.closeModal());
             } else {
                 const existingItem = state.estoque.find(i => i.item && i.item.toLowerCase() === newItem.item.toLowerCase());
-                saveDocument('estoque', newItem, existingItem ? existingItem.id : null);
+                saveDocument('estoque', newItem, existingItem ? existingItem.id : null).then(() => window.closeModal());
             }
         };
 
@@ -917,14 +923,14 @@
             };
 
             if (id) {
-                saveDocument('das', newEntry, id);
+                saveDocument('das', newEntry, id).then(() => window.closeModal());
             } else {
                 const existingItem = state.das.find(i => i.mesReferencia === newEntry.mesReferencia);
-                saveDocument('das', newEntry, existingItem ? existingItem.id : null);
+                saveDocument('das', newEntry, existingItem ? existingItem.id : null).then(() => window.closeModal());
             }
         };
         
-        // --- LÓGICA DE UPLOAD DE ARQUIVOS (INALTERADA) ---
+        // --- LÓGICA DE UPLOAD DE ARQUIVOS ---
         
         function setupComprovantesDragDrop() {
             const dropArea = document.getElementById('dropArea');
@@ -932,13 +938,16 @@
             
             if (!dropArea || !fileInput) return;
 
-            dropArea.addEventListener('click', () => fileInput.click());
+            // Limpa handlers antigos antes de adicionar novos
+            dropArea.onclick = () => fileInput.click(); 
 
-            fileInput.addEventListener('change', (e) => {
+            fileInput.onchange = (e) => {
                 if (e.target.files.length > 0) {
                     handleFileUpload(e.target.files[0]); 
+                    // Reset do input para permitir upload do mesmo arquivo
+                    e.target.value = '';
                 }
-            });
+            };
 
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
                 dropArea.addEventListener(eventName, preventDefaults, false);
@@ -968,7 +977,7 @@
 
         async function handleFileUpload(file) {
             if (!userId || !storage) {
-                showToast('Erro de autenticação ou Storage não inicializado.', 'error');
+                showToast('Erro: Usuário não autenticado ou Storage não inicializado. Tente recarregar.', 'error');
                 return;
             }
             
@@ -983,43 +992,63 @@
             
             const fileName = file.name;
             const timestamp = Date.now();
-            const storagePath = `comprovantes/${userId}/${timestamp}_${fileName}`;
+            // O caminho de Storage usa o userId para garantir que cada usuário tenha sua própria pasta
+            const storagePath = `comprovantes/${userId}/${timestamp}_${fileName}`; 
             const storageRef = ref(storage, storagePath);
 
             uploadStatus.textContent = `Iniciando upload de ${fileName}...`;
             progressBarContainer.classList.remove('hidden');
+            progressBar.style.width = '0%'; // Garante que a barra comece do zero
 
-            try {
-                
-                const snapshot = await uploadBytes(storageRef, file);
-                const downloadURL = await getDownloadURL(snapshot.ref);
+            // Usando uploadBytesResumable para rastrear o progresso
+            const uploadTask = uploadBytesResumable(storageRef, file);
 
-                const newComprovante = {
-                    nomeArquivo: fileName,
-                    tipoArquivo: file.type,
-                    dataUpload: new Date().toISOString().split('T')[0],
-                    url: downloadURL,
-                    tamanho: file.size, 
-                    linkedTo: null, 
-                };
+            uploadTask.on('state_changed', 
+                (snapshot) => {
+                    // 1. Monitora o progresso
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    progressBar.style.width = progress.toFixed(0) + '%';
+                    uploadStatus.textContent = `Upload: ${progress.toFixed(0)}% concluído...`;
+                }, 
+                (error) => {
+                    // 2. Trata Erros 
+                    console.error("Erro no upload ou Storage Rules:", error);
+                    showToast(`Falha no upload! Erro: ${error.code} (Verifique Regras de Segurança do Storage)`, 'error');
+                    progressBarContainer.classList.add('hidden');
+                }, 
+                async () => {
+                    // 3. Conclusão do Upload
+                    try {
+                        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
 
-                await addDoc(collection(db, getCollectionPath('comprovantes')), { 
-                    ...newComprovante, 
-                    createdAt: serverTimestamp() 
-                });
-                
-                progressBar.style.width = '100%';
-                showToast(`Comprovante "${fileName}" enviado e registrado!`, 'success');
-                window.closeModal();
+                        const newComprovante = {
+                            nomeArquivo: fileName,
+                            tipoArquivo: file.type,
+                            dataUpload: new Date().toISOString().split('T')[0],
+                            url: downloadURL,
+                            tamanho: file.size, 
+                            linkedTo: null, 
+                        };
 
-            } catch (error) {
-                console.error("Erro no upload ou registro:", error);
-                showToast(`Falha no upload: ${error.message}`, 'error');
-            } finally {
-                progressBarContainer.classList.add('hidden');
-                progressBar.style.width = '0%';
-                uploadStatus.textContent = 'Aguardando arquivo...';
-            }
+                        await addDoc(collection(db, getCollectionPath('comprovantes')), { 
+                            ...newComprovante, 
+                            createdAt: serverTimestamp() 
+                        });
+                        
+                        progressBar.style.width = '100%';
+                        showToast(`Comprovante "${fileName}" enviado e registrado!`, 'success');
+                        window.closeModal();
+
+                    } catch (firestoreError) {
+                        console.error("Erro ao registrar no Firestore após upload:", firestoreError);
+                        showToast(`Upload OK, mas falha ao registrar no Firestore: ${firestoreError.message}`, 'error');
+                    } finally {
+                        progressBarContainer.classList.add('hidden');
+                        progressBar.style.width = '0%';
+                        uploadStatus.textContent = 'Aguardando arquivo...';
+                    }
+                }
+            );
         }
         
         /**
@@ -1029,6 +1058,7 @@
         window.openLinkedComprovante = (comprovanteId) => {
             const comprovante = state.comprovantes.find(c => c.id === comprovanteId);
             if (comprovante && comprovante.url) {
+                // Decodificação para lidar com URLs de Storage que podem ter caracteres especiais
                 window.open(decodeURIComponent(comprovante.url), '_blank');
             } else {
                 showToast('URL do comprovante não encontrada.', 'error');
@@ -1036,9 +1066,235 @@
         };
 
 
-        // --- RENDERIZAÇÃO DE TABELAS (MODIFICADA PARA BOTÃO DE EDIÇÃO) ---
+        // --- FUNÇÃO AUXILIAR: ESTRUTURA PARA EXPORTAÇÃO PDF ---
+        const getExportTableStructure = (collectionName, data) => {
+            const headers = [];
+            const body = [];
+            let totalRow = null;
+            let dateKey = 'data';
+            
+            // Define a estrutura e formata os dados
+            switch (collectionName) {
+                case 'faturamento':
+                    dateKey = 'data';
+                    headers.push("Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)");
+                    
+                    data.forEach(item => {
+                        const valor = parseFloat(item.valor || 0);
+                        const custo = parseFloat(item.custo || 0);
+                        const lucro = valor - custo;
+                        body.push([
+                            item.data ? new Date(item.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
+                            item.cliente || 'N/A',
+                            item.descricao,
+                            item.pagamento,
+                            formatCurrency(valor),
+                            formatCurrency(custo),
+                            formatCurrency(lucro),
+                        ]);
+                    });
 
-        const renderControls = (collectionName) => {
+                    const totalFaturamento = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                    const totalCusto = data.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
+                    const totalLucro = totalFaturamento - totalCusto;
+                    totalRow = [
+                        { content: 'TOTAIS NO PERÍODO:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalFaturamento), styles: { fontStyle: 'bold', fillColor: [200, 255, 220] } },
+                        { content: formatCurrency(totalCusto), styles: { fontStyle: 'bold', fillColor: [255, 230, 230] } },
+                        { content: formatCurrency(totalLucro), styles: { fontStyle: 'bold', fillColor: totalLucro >= 0 ? [200, 255, 220] : [255, 230, 230] } },
+                    ];
+                    break;
+
+                case 'despesas':
+                    dateKey = 'data';
+                    headers.push("Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)");
+                    
+                    data.forEach(item => {
+                        body.push([
+                            item.data ? new Date(item.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
+                            item.tipo,
+                            item.descricao,
+                            item.pagamento,
+                            formatCurrency(parseFloat(item.valor || 0)),
+                        ]);
+                    });
+
+                    const totalDespesas = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                    totalRow = [
+                        { content: 'TOTAL DE DESPESAS NO PERÍODO:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalDespesas), styles: { fontStyle: 'bold', fillColor: [255, 230, 230] } },
+                    ];
+                    break;
+                    
+                case 'prolabore':
+                    dateKey = 'data';
+                    headers.push("Data", "Descrição", "Valor Retirado (R$)");
+                    
+                    data.forEach(item => {
+                        body.push([
+                            item.data ? new Date(item.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
+                            item.descricao,
+                            formatCurrency(parseFloat(item.valor || 0)),
+                        ]);
+                    });
+
+                    const totalProlabore = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                    totalRow = [
+                        { content: 'TOTAL DE PRÓ-LABORE NO PERÍODO:', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalProlabore), styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } },
+                    ];
+                    break;
+
+                case 'notasemitidas':
+                    dateKey = 'dataEmissao';
+                    headers.push("Emissão", "Nº NF", "Cliente", "Descrição", "Valor (R$)");
+                    
+                    data.forEach(item => {
+                        body.push([
+                            item.dataEmissao ? new Date(item.dataEmissao + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
+                            item.numeroNF,
+                            item.cliente,
+                            item.descricao,
+                            formatCurrency(parseFloat(item.valor || 0)),
+                        ]);
+                    });
+
+                    const totalNotas = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
+                    totalRow = [
+                        { content: 'TOTAL DE NOTAS EMITIDAS NO PERÍODO:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalNotas), styles: { fontStyle: 'bold', fillColor: [230, 230, 255] } },
+                    ];
+                    break;
+                    
+                case 'estoque':
+                    dateKey = 'item'; // Não usado, mas necessário
+                    headers.push("Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)");
+                    
+                    data.forEach(item => {
+                         const custoUnitario = parseFloat(item.custoUnitario || 0);
+                         const total = parseFloat(item.total || 0);
+                        body.push([
+                            item.item,
+                            item.quantidade,
+                            formatCurrency(custoUnitario),
+                            formatCurrency(total),
+                        ]);
+                    });
+
+                    const totalEstoque = data.reduce((sum, item) => sum + parseFloat(item.total || 0), 0);
+                    totalRow = [
+                        { content: 'VALOR TOTAL DO ESTOQUE:', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalEstoque), styles: { fontStyle: 'bold', fillColor: [200, 255, 220] } },
+                    ];
+                    break;
+
+                case 'das':
+                    dateKey = 'pagoEm';
+                    headers.push("Mês Ref.", "Valor DAS (R$)", "Pago em");
+                    
+                    data.forEach(item => {
+                        const [year, month] = item.mesReferencia.split('-');
+                        const mesRefFormatado = `${month}/${year}`;
+                        
+                        body.push([
+                            mesRefFormatado,
+                            formatCurrency(parseFloat(item.valorDas || 0)),
+                            item.pagoEm ? new Date(item.pagoEm + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
+                        ]);
+                    });
+
+                    const totalDas = data.reduce((sum, item) => sum + parseFloat(item.valorDas || 0), 0);
+                    totalRow = [
+                        { content: 'TOTAL DAS PAGO:', colSpan: 1, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: formatCurrency(totalDas), styles: { fontStyle: 'bold', fillColor: [255, 230, 230] } },
+                        { content: '', colSpan: 1 }
+                    ];
+                    break;
+            }
+
+            return { headers, body, totalRow, dateKey };
+        };
+
+
+        // --- FUNÇÃO DE EXPORTAÇÃO PARA PDF (REFACTOR) ---
+        window.exportToPDF = async (collectionName, title) => {
+            const exportButton = document.getElementById(`export-pdf-btn-${collectionName}`);
+            const originalText = exportButton.innerHTML;
+            
+            exportButton.disabled = true;
+            exportButton.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin mr-2"></i> Gerando PDF...';
+
+            try {
+                const { jsPDF } = window.jspdf;
+                // Usa 'l' (landscape) para que caiba mais colunas, como no Faturamento
+                const pdf = new jsPDF('l', 'mm', 'a4'); 
+                
+                // 1. Obter Dados Filtrados
+                const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
+                const monthYearFilter = document.getElementById(`${collectionName}-month-year`)?.value;
+                const searchFilter = document.getElementById(`${collectionName}-search`)?.value;
+                const filteredData = filterAndSortData(state[collectionName], searchFilter, monthYearFilter, dateKey);
+
+                if (filteredData.length === 0) {
+                    showToast("Nenhum dado encontrado para exportar com os filtros atuais.", 'error');
+                    return;
+                }
+                
+                const { headers, body, totalRow } = getExportTableStructure(collectionName, filteredData);
+
+                // 2. Título e Metadata
+                pdf.setFontSize(20);
+                pdf.setTextColor(40, 40, 40);
+                pdf.text(`Relatório MEI: ${title}`, 15, 20);
+
+                pdf.setFontSize(10);
+                const filterInfo = `Filtros: Mês/Ano: ${monthYearFilter || 'Todos'} | Busca: ${searchFilter || 'Nenhuma'}`;
+                pdf.text(filterInfo, 15, 28);
+                pdf.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 15, 33);
+                
+                const finalBody = body;
+                if (totalRow) {
+                    finalBody.push(totalRow);
+                }
+
+                // 3. AutoTable (Geração da Tabela)
+                pdf.autoTable({
+                    head: [headers],
+                    body: finalBody,
+                    startY: 40,
+                    theme: 'striped', // Tema profissional e limpo
+                    styles: { fontSize: 8, cellPadding: 2, textColor: [50, 50, 50] },
+                    headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold' },
+                    margin: { top: 10, right: 15, bottom: 10, left: 15 },
+                    // Footer/Header para numeração de página
+                    didDrawPage: function(data) {
+                        pdf.setFontSize(8);
+                        const pageCount = pdf.internal.getNumberOfPages();
+                        // Footer
+                        pdf.text(`Página ${data.pageNumber} de ${pageCount}`, data.settings.margin.left, pdf.internal.pageSize.height - 10);
+                    }
+                });
+
+                // 4. Salvar (Baixar para a memória do dispositivo)
+                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const fileName = `${collectionName}_Relatorio_${date}.pdf`;
+                pdf.save(fileName);
+
+                showToast(`PDF '${fileName}' gerado e baixado!`, 'success');
+                
+            } catch (error) {
+                console.error("Erro ao gerar PDF:", error);
+                showToast(`Erro ao exportar: ${error.message}`, 'error');
+            } finally {
+                exportButton.disabled = false;
+                exportButton.innerHTML = originalText;
+            }
+        };
+
+
+        // --- RENDERIZAÇÃO DE TABELAS (MODIFICADA PARA BOTÃO DE EXPORTAR) ---
+
+        const renderControls = (collectionName, title) => {
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
             
             return `
@@ -1057,6 +1313,15 @@
                                class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
                                onchange="handleSearchFilter('${collectionName}', '${dateKey}')">
                         <button onclick="clearMonthFilter('${collectionName}')" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Filtro</button>
+                    </div>
+                    <!-- Botão Exportar PDF -->
+                    <div class="w-full sm:w-auto flex items-end">
+                        <button id="export-pdf-btn-${collectionName}"
+                                onclick="exportToPDF('${collectionName}', '${title}')"
+                                class="w-full sm:w-auto px-4 py-2.5 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition active:scale-95 text-sm"
+                                aria-label="Exportar para PDF">
+                            <i class="ph-bold ph-file-pdf mr-2"></i> Exportar PDF
+                        </button>
                     </div>
                 </div>
             `;
@@ -1080,6 +1345,7 @@
             const addComprovanteColumn = collectionName === 'faturamento' || collectionName === 'despesas';
             const extraHeader = addComprovanteColumn ? `<th class="p-3 text-center font-medium w-16">Arq.</th>` : '';
 
+            // Renderiza cabeçalho dentro de THEAD
             const headerHTML = headers.map(h => `<th class="p-3 text-left font-medium">${h}</th>`).join('');
             
             const rowsHTML = filteredData.map(item => {
@@ -1147,9 +1413,6 @@
             let totalClass = 'text-white';
             let totalColspan = dataKeys.length; 
             
-            // Ajusta o colspan para incluir a coluna de Arquivo no total
-            const finalColspan = addComprovanteColumn ? dataKeys.length + 1 : dataKeys.length;
-
             if (collectionName === 'faturamento') {
                 const totalFaturamento = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
                 const totalCusto = filteredData.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
@@ -1211,6 +1474,8 @@
                 </div>
             `;
         };
+        
+        // --- FUNÇÕES DE RENDERIZAÇÃO DE TELA (MODIFICADAS PARA USAR CONTAINER DE EXPORTAÇÃO) ---
 
         const renderFaturamento = () => {
             const tabEl = document.getElementById('faturamento');
@@ -1218,7 +1483,8 @@
             const headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
             const dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
             const valueColumns = ["valor", "custo", "lucro"];
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Faturamento (Vendas e Receitas)</h2>${renderControls('faturamento')}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Transações</h3><div id="faturamento-table-container">${createTableHTML('faturamento', data, headers, dataKeys, valueColumns)}</div>`;
+            const title = "Registro de Faturamento (Vendas e Receitas)";
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('faturamento', title)}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Transações</h3><div id="faturamento-export-container"><div id="faturamento-table-container">${createTableHTML('faturamento', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
 
         const renderDespesas = () => {
@@ -1227,7 +1493,8 @@
             const headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"];
             const dataKeys = ["data", "tipo", "descricao", "pagamento", "valor"];
             const valueColumns = ["valor"];
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Despesas Operacionais</h2>${renderControls('despesas')}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Despesas</h3><div id="despesas-table-container">${createTableHTML('despesas', data, headers, dataKeys, valueColumns)}</div>`;
+            const title = "Registro de Despesas Operacionais";
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('despesas', title)}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Despesas</h3><div id="despesas-export-container"><div id="despesas-table-container">${createTableHTML('despesas', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
         
         const renderProLabore = () => {
@@ -1236,8 +1503,9 @@
             const headers = ["Data", "Descrição", "Valor Retirado (R$)"];
             const dataKeys = ["data", "descricao", "valor"];
             const valueColumns = ["valor"];
+            const title = "Controle de Pró-Labore (Retiradas do Sócio)";
             const totalProlabore = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Controle de Pró-Labore (Retiradas do Sócio)</h2>${renderControls('prolabore')}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-yellow-500"><p class="text-sm font-medium text-gray-400">Total Retirado Acumulado:</p><p class="text-3xl font-bold mt-1 text-yellow-400">${formatCurrency(totalProlabore)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Retiradas</h3><div id="prolabore-table-container">${createTableHTML('prolabore', data, headers, dataKeys, valueColumns)}</div>`;
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('prolabore', title)}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-yellow-500"><p class="text-sm font-medium text-gray-400">Total Retirado Acumulado:</p><p class="text-3xl font-bold mt-1 text-yellow-400">${formatCurrency(totalProlabore)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Retiradas</h3><div id="prolabore-export-container"><div id="prolabore-table-container">${createTableHTML('prolabore', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
         
         const renderNotasEmitidas = () => {
@@ -1246,16 +1514,15 @@
             const headers = ["Emissão", "Nº NF", "Cliente", "Descrição", "Valor (R$)"];
             const dataKeys = ["dataEmissao", "numeroNF", "cliente", "descricao", "valor"];
             const valueColumns = ["valor"];
+            const title = "Registro de Notas Fiscais Emitidas";
             const totalNotas = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Registro de Notas Fiscais Emitidas</h2>${renderControls('notasemitidas')}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-indigo-500"><p class="text-sm font-medium text-gray-400">Total Faturado em NF:</p><p class="text-3xl font-bold mt-1 notas-text">${formatCurrency(totalNotas)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Notas</h3><div id="notasemitidas-table-container">${createTableHTML('notasemitidas', data, headers, dataKeys, valueColumns)}</div>`;
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('notasemitidas', title)}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-indigo-500"><p class="text-sm font-medium text-gray-400">Total Faturado em NF:</p><p class="text-3xl font-bold mt-1 notas-text">${formatCurrency(totalNotas)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Notas</h3><div id="notasemitidas-export-container"><div id="notasemitidas-table-container">${createTableHTML('notasemitidas', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
 
-        // MODIFICADO: Exibe o status de vínculo do comprovante
         const renderComprovantes = () => {
             const tabEl = document.getElementById('comprovantes');
             const data = state.comprovantes.sort((a, b) => new Date(b.dataUpload) - new Date(a.dataUpload));
             
-            // Renderiza o grid de comprovantes
             const comprovanteCardsHTML = data.map(item => {
                 const isImage = item.tipoArquivo && item.tipoArquivo.startsWith('image/');
                 const icon = isImage ? 'ph-image-square-fill' : 'ph-file-pdf-fill';
@@ -1308,6 +1575,7 @@
                     : `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">${comprovanteCardsHTML}</div>`
                 }
             `;
+            // Não há exportação de PDF para esta tela, pois o conteúdo é um grid de cards, não uma tabela de dados
         };
 
         const renderEstoque = () => {
@@ -1316,8 +1584,11 @@
             const headers = ["Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)"];
             const dataKeys = ["item", "quantidade", "custoUnitario", "total"];
             const valueColumns = ["custoUnitario", "total"];
+            const title = "Controle de Estoque";
             const totalEstoqueValor = data.reduce((sum, item) => sum + parseFloat(item.total || 0), 0);
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Controle de Estoque</h2><div class="card p-4 mb-6 rounded-xl text-center border border-[#333]"><p class="text-sm font-medium text-gray-400">Valor Total do Estoque:</p><p class="text-3xl font-bold mt-1 neon-text">${formatCurrency(totalEstoqueValor)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Inventário Atual</h3><div id="estoque-table-container">${createTableHTML('estoque', data, headers, dataKeys, valueColumns)}</div>`;
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('estoque', title)}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333]"><p class="text-sm font-medium text-gray-400">Valor Total do Estoque:</p><p class="text-3xl font-bold mt-1 neon-text">${formatCurrency(totalEstoqueValor)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Inventário Atual</h3><div id="estoque-export-container"><div id="estoque-table-container">${createTableHTML('estoque', data, headers, dataKeys, valueColumns)}</div></div>`;
+             // Remove o botão de FAB da aba estoque
+            fabButton.classList.add('hidden');
         };
 
         const renderDas = () => {
@@ -1326,7 +1597,8 @@
             const headers = ["Mês de Referência", "Valor DAS (R$)", "Pago em"];
             const dataKeys = ["mesReferencia", "valorDas", "pagoEm"];
             const valueColumns = ["valorDas"];
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">Acompanhamento da Guia DAS (MEI)</h2>${renderControls('das')}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Pagamentos DAS</h3><div id="das-table-container">${createTableHTML('das', data, headers, dataKeys, valueColumns)}</div>`;
+            const title = "Acompanhamento da Guia DAS (MEI)";
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('das', title)}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Pagamentos DAS</h3><div id="das-export-container"><div id="das-table-container">${createTableHTML('das', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
 
 
@@ -1593,15 +1865,19 @@
             if (tabName === 'dashboard') renderDashboard();
             
             // O FAB só é escondido para as abas Dashboard e Estoque
-            if (tabName === 'dashboard' || tabName === 'estoque') {
+            if (tabName === 'dashboard' || tabName === 'estoque' || tabName === 'comprovantes') {
                 fabButton.classList.add('hidden');
+                // Comprovantes usa o botão FAB para o upload
+                if (tabName === 'comprovantes') {
+                    fabButton.classList.remove('hidden');
+                }
             } else {
                 fabButton.classList.remove('hidden');
             }
             
             // Otimização para garantir que o FAB clique no modal correto
              if (tabName !== 'dashboard' && tabName !== 'estoque') {
-                 fabButton.onclick = () => window.openEntryModal(tabName);
+                 fabButton.onclick = () => window.openEntryModal(state.activeTab);
              }
         };
 
@@ -1629,8 +1905,9 @@
             window.closeModal = closeModal;
             window.handleFileUpload = handleFileUpload; 
             window.openEntryModal = openEntryModal; 
-            window.openEditModal = openEditModal; // NOVO: Edição
+            window.openEditModal = openEditModal; 
             window.openLinkedComprovante = openLinkedComprovante; 
+            window.exportToPDF = exportToPDF; // EXPONDO FUNÇÃO DE EXPORTAÇÃO
             
             // Handlers de filtro do Dashboard
             window.handleDashboardMonthFilter = (value) => {
@@ -1674,6 +1951,10 @@
                 headers = ["Mês de Referência", "Valor DAS (R$)", "Pago em"];
                 dataKeys = ["mesReferencia", "valorDas", "pagoEm"];
                 valueColumns = ["valorDas"];
+            } else if (collectionName === 'estoque') {
+                 headers = ["Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)"];
+                 dataKeys = ["item", "quantidade", "custoUnitario", "total"];
+                 valueColumns = ["custoUnitario", "total"];
             } else {
                 return;
             }
