@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MEI Controle Financeiro</title>
+    
+    <!-- PWA: Link para o Manifest (NOVO) -->
+    <link rel="manifest" href="manifest.json">
+    
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js CDN for Analytics -->
@@ -11,8 +15,7 @@
     <!-- Phosphor Icons for ICONS -->
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
     
-    <!-- PDF Export Libraries (NOVO) -->
-    <!-- REMOVIDO html2canvas, ADICIONADO jspdf-autotable para tabelas profissionais -->
+    <!-- PDF Export Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     
@@ -166,6 +169,21 @@
 
     <!-- Firebase and Application Logic -->
     <script type="module">
+        // =================================================================
+        // REGISTRO DO SERVICE WORKER (NOVO)
+        // =================================================================
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => {
+                        console.log('Service Worker registrado com sucesso:', reg.scope);
+                    })
+                    .catch(err => {
+                        console.error('Falha no registro do Service Worker:', err);
+                    });
+            });
+        }
+        
         // =================================================================
         // FIREBASE IMPORTS
         // =================================================================
@@ -704,7 +722,7 @@
                 </form>
             `;
         };
-
+        
         // MODIFICADO: Preenchimento de dados
         const getProLaboreFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1067,6 +1085,23 @@
 
 
         // --- FUNÇÃO AUXILIAR: ESTRUTURA PARA EXPORTAÇÃO PDF ---
+        
+        // NOVO: Função auxiliar para gerar a tabela de KPIs para o Dashboard PDF
+        const getDashboardKpiTable = (kpis) => {
+            return {
+                headers: ["Indicador", "Valor (R$)", "Observação"],
+                body: [
+                    ["Faturamento Total (Recebido)", formatCurrency(kpis.faturamentoTotal), ""],
+                    ["Despesas Totais (Custos + Op.)", formatCurrency(kpis.despesasTotais), ""],
+                    ["Lucro Líquido (ANTES Pró-Labore)", formatCurrency(kpis.lucroLiquido), kpis.lucroLiquido >= 0 ? "Resultado Positivo" : "Resultado Negativo"],
+                    [{ content: 'PRÓ-LABORE RETIRADO', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.proLaboreTotal), `Representa ${kpis.proLaborePercent.toFixed(2)}% do Faturamento`],
+                    [{ content: 'LUCRO FINAL APÓS PRÓ-LABORE', styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, 
+                     { content: formatCurrency(kpis.lucroLiquidoFinal), styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, ""],
+                ]
+            };
+        };
+
+
         const getExportTableStructure = (collectionName, data) => {
             const headers = [];
             const body = [];
@@ -1216,7 +1251,7 @@
         };
 
 
-        // --- FUNÇÃO DE EXPORTAÇÃO PARA PDF (REFACTOR) ---
+        // --- FUNÇÃO DE EXPORTAÇÃO PARA PDF (REFACTOR COM SUPORTE A DASHBOARD) ---
         window.exportToPDF = async (collectionName, title) => {
             const exportButton = document.getElementById(`export-pdf-btn-${collectionName}`);
             const originalText = exportButton.innerHTML;
@@ -1226,10 +1261,58 @@
 
             try {
                 const { jsPDF } = window.jspdf;
-                // Usa 'l' (landscape) para que caiba mais colunas, como no Faturamento
-                const pdf = new jsPDF('l', 'mm', 'a4'); 
+                const pdf = new jsPDF('l', 'mm', 'a4'); // Usa 'l' (landscape) para mais espaço
+                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                let fileName = `${collectionName}_Relatorio_${date}.pdf`;
+
+                if (collectionName === 'dashboard') {
+                    // =========================================================
+                    // LÓGICA DE EXPORTAÇÃO DO DASHBOARD
+                    // =========================================================
+                    const monthYearFilter = document.getElementById(`dashboard-month-year`)?.value;
+                    const kpis = calculateKPIs(monthYearFilter);
+                    const kpiTableData = getDashboardKpiTable(kpis);
+                    
+                    fileName = `Dashboard_Relatorio_MEI_${monthYearFilter || date}.pdf`;
+
+                    // 1. Título e Metadata
+                    pdf.setFontSize(20);
+                    pdf.setTextColor(40, 40, 40);
+                    pdf.text(`Relatório MEI: ${title}`, 15, 20);
+
+                    pdf.setFontSize(10);
+                    const filterInfo = `Período Analisado: ${monthYearFilter || 'Histórico Completo'}`;
+                    pdf.text(filterInfo, 15, 28);
+                    pdf.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 15, 33);
+                    
+                    // 2. Tabela de KPIs
+                    pdf.setFontSize(14);
+                    pdf.text("Resumo de Indicadores Chave (KPIs)", 15, 45);
+
+                    pdf.autoTable({
+                        head: [kpiTableData.headers],
+                        body: kpiTableData.body,
+                        startY: 50,
+                        theme: 'striped',
+                        styles: { fontSize: 10, cellPadding: 3, textColor: [50, 50, 50] },
+                        headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold' },
+                        margin: { top: 10, right: 15, bottom: 10, left: 15 },
+                        didDrawPage: (data) => {
+                            pdf.setFontSize(8);
+                            const pageCount = pdf.internal.getNumberOfPages();
+                            pdf.text(`Página ${data.pageNumber} de ${pageCount}`, data.settings.margin.left, pdf.internal.pageSize.height - 10);
+                        }
+                    });
+
+                    pdf.save(fileName);
+                    showToast(`PDF '${fileName}' gerado e baixado!`, 'success');
+                    return; 
+                }
                 
-                // 1. Obter Dados Filtrados
+                // =========================================================
+                // LÓGICA DE EXPORTAÇÃO DE OUTRAS COLEÇÕES
+                // =========================================================
+
                 const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
                 const monthYearFilter = document.getElementById(`${collectionName}-month-year`)?.value;
                 const searchFilter = document.getElementById(`${collectionName}-search`)?.value;
@@ -1241,8 +1324,8 @@
                 }
                 
                 const { headers, body, totalRow } = getExportTableStructure(collectionName, filteredData);
-
-                // 2. Título e Metadata
+                
+                // Título e Metadata
                 pdf.setFontSize(20);
                 pdf.setTextColor(40, 40, 40);
                 pdf.text(`Relatório MEI: ${title}`, 15, 20);
@@ -1257,7 +1340,7 @@
                     finalBody.push(totalRow);
                 }
 
-                // 3. AutoTable (Geração da Tabela)
+                // AutoTable (Geração da Tabela)
                 pdf.autoTable({
                     head: [headers],
                     body: finalBody,
@@ -1275,9 +1358,7 @@
                     }
                 });
 
-                // 4. Salvar (Baixar para a memória do dispositivo)
-                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-                const fileName = `${collectionName}_Relatorio_${date}.pdf`;
+                // Salvar (Baixar para a memória do dispositivo)
                 pdf.save(fileName);
 
                 showToast(`PDF '${fileName}' gerado e baixado!`, 'success');
@@ -1475,7 +1556,7 @@
             `;
         };
         
-        // --- FUNÇÕES DE RENDERIZAÇÃO DE TELA (MODIFICADAS PARA USAR CONTAINER DE EXPORTAÇÃO) ---
+        // --- FUNÇÕES DE RENDERIZAÇÃO DE TELA (MODIFICADA PARA USAR CONTAINER DE EXPORTAÇÃO) ---
 
         const renderFaturamento = () => {
             const tabEl = document.getElementById('faturamento');
@@ -1769,26 +1850,41 @@
             tabEl.innerHTML = `
                 <h2 class="text-3xl font-bold mb-8 neon-text">Resumo Geral e Análise Financeira</h2>
 
-                <!-- Controles de Filtro para Dashboard -->
-                <div class="flex flex-col sm:flex-row gap-4 mb-8 card p-4 rounded-xl border border-[#333]">
-                    <div class="w-full sm:w-1/2">
-                        <label for="dashboard-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar Resumo por Mês/Ano</label>
-                        <input type="month" id="dashboard-month-year" value="${state.dashboardMonthYearFilter || ''}"
-                               class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
-                               onchange="handleDashboardMonthFilter(this.value)">
-                        <button onclick="clearDashboardMonthFilter()" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Filtro</button>
-                    </div>
-                    <div class="w-full sm:w-1/2">
-                        <label for="dashboard-granularity-selector" class="block text-sm font-medium text-gray-400 mb-1">Granularidade do Gráfico</label>
-                        <div id="dashboard-granularity-selector" class="flex space-x-2 mt-1">
-                        ${granularityOptions.map(opt => `
-                            <button onclick="changeGranularity('${opt.value}')"
-                                class="px-3 py-1 text-xs font-medium rounded-full transition duration-150 active:scale-95
-                                ${state.dashboardGranularity === opt.value ? 'bg-[#00ff88] text-[#121212] neon-glow' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#3a3a3a]'}">
-                                ${opt.label}
-                            </button>
-                        `).join('')}
+                <!-- Filtros e Ações do Dashboard (Inclui Exportação PDF) -->
+                <div class="flex flex-col sm:flex-row gap-4 mb-8 card p-4 rounded-xl border border-[#333] justify-between items-start sm:items-end">
+                    <!-- Filtro por Mês/Ano -->
+                    <div class="flex-grow w-full sm:w-auto">
+                        <label for="dashboard-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar KPIs e Gráfico por Mês/Ano</label>
+                        <div class="flex space-x-2">
+                            <input type="month" id="dashboard-month-year" value="${state.dashboardMonthYearFilter || ''}"
+                                class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                                onchange="handleDashboardMonthFilter(this.value)">
+                            <button onclick="clearDashboardMonthFilter()" class="p-2.5 text-xs text-gray-500 hover:text-white transition duration-200 rounded-lg bg-[#2a2a2a] whitespace-nowrap">Limpar</button>
                         </div>
+                    </div>
+                    
+                    <!-- Botão Exportar PDF -->
+                    <div class="w-full sm:w-auto flex items-end">
+                        <button id="export-pdf-btn-dashboard"
+                                onclick="exportToPDF('dashboard', 'Resumo Geral do Período')"
+                                class="w-full sm:w-auto px-4 py-2.5 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition active:scale-95 text-sm"
+                                aria-label="Exportar para PDF">
+                            <i class="ph-bold ph-file-pdf mr-2"></i> Exportar PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Controles de Granularidade do Gráfico -->
+                <div class="mb-8 card p-4 rounded-xl border border-[#333]">
+                    <label for="dashboard-granularity-selector" class="block text-sm font-medium text-gray-400 mb-2">Granularidade do Gráfico (Análise Histórica)</label>
+                    <div id="dashboard-granularity-selector" class="flex space-x-2">
+                    ${granularityOptions.map(opt => `
+                        <button onclick="changeGranularity('${opt.value}')"
+                            class="px-3 py-1 text-xs font-medium rounded-full transition duration-150 active:scale-95
+                            ${state.dashboardGranularity === opt.value ? 'bg-[#00ff88] text-[#121212] neon-glow' : 'bg-[#2a2a2a] text-gray-300 hover:bg-[#3a3a3a]'}">
+                            ${opt.label}
+                        </button>
+                    `).join('')}
                     </div>
                 </div>
                 
