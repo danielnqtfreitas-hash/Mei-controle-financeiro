@@ -1,0 +1,28 @@
+{
+  "name": "MEI Controle Financeiro",
+  "short_name": "MEI Cont.",
+  "description": "Controle financeiro completo para Microempreendedores Individuais (MEI).",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00ff88",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/00ff88/0a0a0a?text=M.C.",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://placehold.co/512x512/00ff88/0a0a0a?text=M.C.",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "https://placehold.co/512x512/00ff88/0a0a0a?text=M.C.",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
+
