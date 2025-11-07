@@ -1091,12 +1091,14 @@
             return {
                 headers: ["Indicador", "Valor (R$)", "Observação"],
                 body: [
-                    ["Faturamento Total (Recebido)", formatCurrency(kpis.faturamentoTotal), ""],
-                    ["Despesas Totais (Custos + Op.)", formatCurrency(kpis.despesasTotais), ""],
-                    ["Lucro Líquido (ANTES Pró-Labore)", formatCurrency(kpis.lucroLiquido), kpis.lucroLiquido >= 0 ? "Resultado Positivo" : "Resultado Negativo"],
+                    ["Faturamento Total (Recebido)", formatCurrency(kpis.faturamentoTotal), "Total de todas as formas de pagamento"],
+                    [{ content: 'Caixa da Conta (Digital)', styles: { fontStyle: 'bold', fillColor: [230, 230, 255] } }, formatCurrency(kpis.caixaConta), "Pix, Cartão, Boleto, etc."],
+                    [{ content: 'Caixa Físico (Dinheiro)', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.caixaFisico), "Somente Receitas em Dinheiro"],
+                    ["Despesas Totais (Custos + Op.)", formatCurrency(kpis.despesasTotais), "Soma de Custos de Venda e Despesas Operacionais"],
+                    ["Lucro Líquido (ANTES Pró-Labore)", formatCurrency(kpis.lucroLiquido), kpis.lucroLiquido >= 0 ? "Resultado Positivo antes de Retiradas" : "Resultado Negativo antes de Retiradas"],
                     [{ content: 'PRÓ-LABORE RETIRADO', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.proLaboreTotal), `Representa ${kpis.proLaborePercent.toFixed(2)}% do Faturamento`],
                     [{ content: 'LUCRO FINAL APÓS PRÓ-LABORE', styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, 
-                     { content: formatCurrency(kpis.lucroLiquidoFinal), styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, ""],
+                     { content: formatCurrency(kpis.lucroLiquidoFinal), styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, "Resultado Final do Período"],
                 ]
             };
         };
@@ -1684,8 +1686,8 @@
 
 
         // --- DASHBOARD AND CHART LOGIC ---
-        // (Mantidos inalterados)
-
+        
+        // MODIFICADO: Inclui cálculo de Caixa Físico e Caixa Conta
         const calculateKPIs = (monthYearFilter) => {
             const filteredFaturamento = filterDataByMonthYear(state.faturamento, 'data', monthYearFilter);
             const filteredDespesas = filterDataByMonthYear(state.despesas, 'data', monthYearFilter);
@@ -1696,6 +1698,19 @@
             const custosFaturamento = filteredFaturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
             const proLaboreTotal = filteredProlabore.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
             
+            // NOVO: Cálculo de Caixa Físico (Dinheiro) e Caixa Conta (Outros)
+            let caixaFisico = 0;
+            let caixaConta = 0;
+
+            filteredFaturamento.forEach(item => {
+                const valor = parseFloat(item.valor || 0);
+                if (item.pagamento === 'Dinheiro') {
+                    caixaFisico += valor;
+                } else {
+                    caixaConta += valor;
+                }
+            });
+
             const despesasTotais = despesasOperacionais + custosFaturamento;
             const lucroLiquido = faturamentoTotal - despesasTotais;
             const lucroLiquidoFinal = lucroLiquido - proLaboreTotal;
@@ -1708,7 +1723,9 @@
                 lucroLiquido, 
                 proLaboreTotal, 
                 lucroLiquidoFinal, 
-                proLaborePercent 
+                proLaborePercent,
+                caixaFisico, // NOVO
+                caixaConta,  // NOVO
             };
         };
 
@@ -1834,9 +1851,10 @@
             chartInstance = new Chart(ctx, chartConfig);
         };
 
+        // MODIFICADO: Inclui Caixa Físico e Caixa Conta no Dashboard
         const renderDashboard = () => {
             const tabEl = document.getElementById('dashboard');
-            const { faturamentoTotal, despesasTotais, lucroLiquido, proLaboreTotal, lucroLiquidoFinal, proLaborePercent } = calculateKPIs(state.dashboardMonthYearFilter);
+            const { faturamentoTotal, despesasTotais, lucroLiquido, proLaboreTotal, lucroLiquidoFinal, proLaborePercent, caixaFisico, caixaConta } = calculateKPIs(state.dashboardMonthYearFilter);
             
             const profitNeonFinal = lucroLiquidoFinal >= 0 ? 'neon-text' : 'text-red-500';
             const profitNeonLiquido = lucroLiquido >= 0 ? 'text-sky-400' : 'text-red-500';
@@ -1890,34 +1908,52 @@
                 
                 <!-- KPIs (Key Performance Indicators) -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-                    <!-- Faturamento Total (Existing) -->
+                    <!-- Faturamento Total (Todos os Pagamentos) -->
                     <div class="card p-4 rounded-xl shadow-lg border-b-4 border-[#00ff88] transition hover:shadow-neon">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Faturamento Total (Recebido)</p>
+                        <p class="text-sm uppercase text-gray-400 font-medium">Faturamento Total (Todos)</p>
                         <p class="text-2xl font-bold mt-1 neon-text">${formatCurrency(faturamentoTotal)}</p>
                     </div>
-                    <!-- Despesas Totais (Existing) -->
+                    <!-- Despesas Totais -->
                     <div class="card p-4 rounded-xl shadow-lg border-b-4 border-red-500 transition hover:shadow-red-900">
                         <p class="text-sm uppercase text-gray-400 font-medium">Despesas Totais (Custos + Op.)</p>
                         <p class="text-2xl font-bold mt-1 text-red-500">${formatCurrency(despesasTotais)}</p>
                     </div>
-                    <!-- Lucro Líquido (Before Pró-Labore) - NOVO DESTAQUE -->
+                    <!-- Lucro Líquido (Before Pró-Labore) -->
                     <div class="card p-4 rounded-xl shadow-lg border-b-4 border-sky-500 transition hover:shadow-sky-900">
                         <p class="text-sm uppercase text-gray-400 font-medium">Lucro Líquido (ANTES PL)</p>
                         <p class="text-2xl font-bold mt-1 ${profitNeonLiquido}">${formatCurrency(lucroLiquido)}</p>
                     </div>
-                    <!-- Pró-Labore Total (NEW) -->
+                    <!-- Pró-Labore Total -->
                     <div class="card p-4 rounded-xl shadow-lg border-b-4 border-yellow-500 transition hover:shadow-yellow-900">
                         <p class="text-sm uppercase text-gray-400 font-medium">Pró-Labore Total Retirado</p>
                         <p class="text-2xl font-bold mt-1 text-yellow-400">${formatCurrency(proLaboreTotal)}</p>
                     </div>
                 </div>
 
-                <!-- Resumo Final e Porcentagem (NEW SECTION) -->
+                <!-- NOVO: KPIs de Caixa Físico e Conta -->
+                <h3 class="text-2xl font-bold mb-4 text-sky-400">Análise de Fluxo de Caixa (Faturamento Bruto)</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+                    <!-- Caixa Conta -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-blue-500 transition hover:shadow-blue-900">
+                        <p class="text-sm uppercase text-gray-400 font-medium">Caixa da Conta (Entradas Digitais)</p>
+                        <p class="text-3xl font-bold mt-1 text-blue-400">${formatCurrency(caixaConta)}</p>
+                    </div>
+                    <!-- Caixa Físico -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-yellow-700 transition hover:shadow-yellow-900">
+                        <p class="text-sm uppercase text-gray-400 font-medium">Caixa Físico (Entradas em Dinheiro)</p>
+                        <p class="text-3xl font-bold mt-1 text-yellow-500">${formatCurrency(caixaFisico)}</p>
+                    </div>
+                </div>
+                
+                <!-- Resumo Final -->
+                <h3 class="text-2xl font-bold mb-4 neon-text">Resultado Final (Lucro Total)</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <!-- Lucro Líquido Final (Total) -->
                     <div class="card p-6 rounded-xl shadow-lg border-b-4 ${lucroLiquidoFinal >= 0 ? 'border-[#00ff88]' : 'border-red-500'}">
-                        <p class="text-lg uppercase text-gray-400 font-medium">LUCRO FINAL APÓS PRÓ-LABORE</p>
+                        <p class="text-lg uppercase text-gray-400 font-medium">LUCRO LÍQUIDO TOTAL (Após PL)</p>
                         <p class="text-5xl font-extrabold mt-2 ${profitNeonFinal}">${formatCurrency(lucroLiquidoFinal)}</p>
                     </div>
+                    <!-- Pró-Labore como % do Faturamento -->
                     <div class="card p-6 rounded-xl shadow-lg border-b-4 border-yellow-500">
                         <p class="text-lg uppercase text-gray-400 font-medium">Pró-Labore como % do Faturamento</p>
                         <p class="text-5xl font-extrabold mt-2 text-yellow-400">${proLaborePercent.toFixed(2)}%</p>
