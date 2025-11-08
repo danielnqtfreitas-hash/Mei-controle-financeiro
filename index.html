@@ -1578,6 +1578,7 @@
                 if (pagamento === 'Dinheiro') {
                     despesasDinheiro += valor;
                 } else {
+                    // Pix, Cartão, Boleto, Transferência, Outro
                     despesasDigitais += valor;
                 }
             });
@@ -1681,6 +1682,9 @@
             const faturamentoData = sortedKeys.map(key => aggregated[key].faturamento);
             const despesasOpData = sortedKeys.map(key => aggregated[key].despesasOperacionais);
             const lucroRetiradoData = sortedKeys.map(key => aggregated[key].lucroRetirado);
+
+            // Cor clara para o texto do gráfico
+            const CHART_TEXT_COLOR = '#f0f0f0'; 
             
             const chartData = {
                 labels: labels,
@@ -1689,7 +1693,7 @@
                         label: 'Faturamento Recebido',
                         data: faturamentoData,
                         backgroundColor: 'rgba(0, 255, 136, 0.7)',
-                        borderColor: 'var(--neon-green)',
+                        borderColor: '#00ff88',
                         borderWidth: 1,
                         borderRadius: 4
                     },
@@ -1722,23 +1726,32 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
+                            // Corrigido: Usando o código literal para garantir visibilidade
+                            color: CHART_TEXT_COLOR, 
                             beginAtZero: true,
                             grid: { color: '#333' },
-                            ticks: { color: 'var(--dark-text)', callback: (value) => formatCurrency(value) }
+                            ticks: { color: CHART_TEXT_COLOR, callback: (value) => formatCurrency(value) }
                         },
                         x: {
+                            // Corrigido: Usando o código literal para garantir visibilidade
+                            color: CHART_TEXT_COLOR, 
                             grid: { display: false },
-                            ticks: { color: 'var(--dark-text)' }
+                            ticks: { color: CHART_TEXT_COLOR }
                         }
                     },
                     plugins: {
-                        legend: { labels: { color: 'var(--dark-text)', boxWidth: 12 } },
+                        legend: { 
+                            labels: { 
+                                color: CHART_TEXT_COLOR, // Corrigido: Cor da Legenda
+                                boxWidth: 12 
+                            } 
+                        },
                         tooltip: {
                             callbacks: {
                                 label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}`
                             }
                         }
-                    }
+                    },
                 }
             };
             
