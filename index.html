@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MEI Controle Financeiro</title>
     
-    <!-- PWA: Link para o Manifest (NOVO) -->
+    <!-- PWA: Link para o Manifest -->
     <link rel="manifest" href="./manifest.json">
     
     <!-- Tailwind CSS CDN -->
@@ -60,11 +60,6 @@
             background-color: rgba(0, 0, 0, 0.8);
             backdrop-filter: blur(5px);
         }
-        /* Cor de destaque para Pró-Labore */
-        .prolabore-text {
-            color: #ffdd00; /* Um amarelo-dourado */
-            text-shadow: 0 0 5px rgba(255, 221, 0, 0.4);
-        }
         /* Cor de destaque para Notas Emitidas */
         .notas-text {
             color: #7f5cff; /* Roxo */
@@ -106,9 +101,6 @@
             <button data-tab="despesas" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
                 <i class="ph-bold ph-trend-down mr-2"></i>Despesas
             </button>
-            <button data-tab="prolabore" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
-                <i class="ph-bold ph-wallet-fill mr-2"></i>Pró-Labore
-            </button>
             <button data-tab="notasemitidas" class="tab-button px-4 py-3 text-sm font-medium whitespace-nowrap transition duration-300 hover:bg-[#282828] active:scale-[0.98]">
                 <i class="ph-bold ph-receipt mr-2"></i>Notas Emitidas
             </button>
@@ -133,7 +125,6 @@
             <!-- Tab content will be rendered here -->
             <div id="faturamento" class="tab-content" style="display: none;"></div>
             <div id="despesas" class="tab-content" style="display: none;"></div>
-            <div id="prolabore" class="tab-content" style="display: none;"></div>
             <div id="notasemitidas" class="tab-content" style="display: none;"></div>
             <div id="comprovantes" class="tab-content" style="display: none;"></div>
             <div id="estoque" class="tab-content" style="display: none;"></div>
@@ -170,7 +161,7 @@
     <!-- Firebase and Application Logic -->
     <script type="module">
         // =================================================================
-        // REGISTRO DO SERVICE WORKER (NOVO)
+        // REGISTRO DO SERVICE WORKER (PWA)
         // =================================================================
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -203,7 +194,6 @@
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         const fallbackFirebaseConfig = {
-            // Configurações de fallback... (mantidas para garantir a execução)
             apiKey: "AIzaSyBI7Zecb-2tn3zUAAhiO5UmtTGcAALUiKg",
             authDomain: "vitrine-913c6.firebaseapp.com",
             projectId: "vitrine-913c6",
@@ -223,9 +213,8 @@
         window.state = {
             faturamento: [],
             despesas: [],
-            prolabore: [], 
             notasemitidas: [],
-            comprovantes: [], // Coleção de comprovantes
+            comprovantes: [],
             estoque: [],
             das: [],
             activeTab: 'faturamento',
@@ -310,33 +299,20 @@
             return filtered;
         };
         
-        /**
-         * Retorna os comprovantes que não estão vinculados a nenhum registro de Faturamento ou Despesa.
-         * @returns {Array} Lista de comprovantes desvinculados.
-         */
         const getUnlinkedComprovantes = () => {
-            // Um comprovante é considerado "unlinked" se não tiver a propriedade 'linkedTo'
             return state.comprovantes.filter(c => !c.linkedTo);
         };
         
-        /**
-         * Gera o HTML para o seletor de comprovantes.
-         * @param {string} currentComprovanteId ID do comprovante já vinculado (para edição).
-         * @returns {string} HTML do select.
-         */
         const getComprovantesSelectHTML = (currentComprovanteId = null) => {
             const unlinked = getUnlinkedComprovantes().sort((a, b) => new Date(b.dataUpload) - new Date(a.dataUpload));
             const currentComprovante = state.comprovantes.find(c => c.id === currentComprovanteId);
 
             let options = `<option value="">-- Sem Comprovante Anexado (Opcional) --</option>`;
             
-            // Adiciona o comprovante atual na lista se estiver em modo de edição
             if (currentComprovante) {
-                // Adiciona a opção selecionada se estiver vinculado (garantindo que o usuário veja o link atual)
                 options += `<option value="${currentComprovante.id}" selected>VINCLADO (Atual): ${currentComprovante.nomeArquivo} (${currentComprovante.dataUpload})</option>`;
             }
 
-            // Adiciona comprovantes não vinculados
             options += unlinked.map(c => 
                 `<option value="${c.id}">${c.nomeArquivo} (${c.dataUpload})</option>`
             ).join('');
@@ -344,12 +320,6 @@
             return options;
         };
         
-        /**
-         * Atualiza o documento Comprovante marcando-o como vinculado.
-         * @param {string} newComprovanteId ID do comprovante no Firestore.
-         * @param {string} linkedTo Valor no formato 'colecao:docId' (Ex: 'faturamento:abcde').
-         * @param {string} oldComprovanteId ID do comprovante que estava vinculado antes (para desvincular).
-         */
         const updateDocumentComprovanteLink = async (newComprovanteId, linkedTo, oldComprovanteId) => {
             if (!db) return;
 
@@ -362,7 +332,7 @@
                 }
             }
 
-            // 2. Vincular o novo comprovante (se houver um novo ID e for diferente do antigo)
+            // 2. Vincular o novo comprovante
             if (newComprovanteId && newComprovanteId !== oldComprovanteId) {
                 try {
                     const comprovanteRef = doc(db, getCollectionPath('comprovantes'), newComprovanteId);
@@ -387,16 +357,14 @@
                 
                 db = getFirestore(app);
                 auth = getAuth(app);
-                storage = getStorage(app); // Inicializa Storage
+                storage = getStorage(app); 
 
-                // Tenta autenticar
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
                     await signInAnonymously(auth);
                 }
                 
-                // Monitora o estado da autenticação
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
@@ -431,14 +399,12 @@
             // Despesas
             onSnapshot(collection(db, getCollectionPath('despesas')), (snapshot) => {
                 state.despesas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Garante que isLucroRetirado seja sempre um booleano
+                state.despesas.forEach(d => {
+                    d.isLucroRetirado = !!d.isLucroRetirado; 
+                });
                 if (['despesas', 'dashboard'].includes(state.activeTab)) render(state.activeTab);
             }, (error) => console.error("Erro no listener de Despesas:", error));
-            
-            // Pró-Labore
-            onSnapshot(collection(db, getCollectionPath('prolabore')), (snapshot) => {
-                state.prolabore = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                if (['prolabore', 'dashboard'].includes(state.activeTab)) render(state.activeTab);
-            }, (error) => console.error("Erro no listener de Pró-Labore:", error));
             
             // Notas Emitidas
             onSnapshot(collection(db, getCollectionPath('notasemitidas')), (snapshot) => {
@@ -446,7 +412,7 @@
                 if (['notasemitidas'].includes(state.activeTab)) render('notasemitidas');
             }, (error) => console.error("Erro no listener de Notas Emitidas:", error));
 
-            // Comprovantes (Atualiza todas as abas que usam dados de link)
+            // Comprovantes
             onSnapshot(collection(db, getCollectionPath('comprovantes')), (snapshot) => {
                 state.comprovantes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 if (['comprovantes', 'faturamento', 'despesas'].includes(state.activeTab)) render(state.activeTab);
@@ -480,7 +446,6 @@
                 return;
             }
             
-            // Salva o documento principal
             let docRef;
             try {
                 if (id) {
@@ -514,7 +479,6 @@
             }
 
             try {
-                // Se for Faturamento ou Despesa, verifica se há comprovante anexado para desvincular
                 if (collectionName === 'faturamento' || collectionName === 'despesas') {
                     const itemToDelete = state[collectionName].find(item => item.id === id);
                     if (itemToDelete && itemToDelete.comprovanteId) {
@@ -522,13 +486,11 @@
                     }
                 }
                 
-                // Se for Comprovante, verifica se está vinculado a algo e notifica
                 if (collectionName === 'comprovantes') {
                     const itemToDelete = state[collectionName].find(item => item.id === id);
                     if (itemToDelete && itemToDelete.linkedTo) {
                          const [linkedCollection, linkedId] = itemToDelete.linkedTo.split(':');
                          if (linkedCollection && linkedId) {
-                             // Tenta desvincular do item principal (limpando o comprovanteId)
                              await setDoc(doc(db, getCollectionPath(linkedCollection), linkedId), { comprovanteId: null }, { merge: true });
                          }
                     }
@@ -542,19 +504,13 @@
             }
         };
 
-        /**
-         * Abre o modal de entrada/edição com base na coleção e, opcionalmente, nos dados para preenchimento.
-         * @param {string} collectionName Nome da coleção.
-         * @param {Object} data Dados para pré-preenchimento (modo edição).
-         */
         window.openEntryModal = (collectionName, data = {}) => {
             let title = data.id ? `Editar Registro (${collectionName})` : 'Novo Registro';
             let formHtml = '';
             
             switch(collectionName) {
                 case 'faturamento': title = data.id ? 'Editar Venda/Receita' : 'Nova Venda/Receita'; formHtml = getFaturamentoFormHTML(data); break;
-                case 'despesas': title = data.id ? 'Editar Despesa' : 'Nova Despesa'; formHtml = getDespesasFormHTML(data); break;
-                case 'prolabore': title = data.id ? 'Editar Pró-Labore' : 'Registro de Pró-Labore'; formHtml = getProLaboreFormHTML(data); break;
+                case 'despesas': title = data.id ? 'Editar Despesa' : 'Nova Despesa/Retirada'; formHtml = getDespesasFormHTML(data); break;
                 case 'notasemitidas': title = data.id ? 'Editar Nota Fiscal' : 'Registro de Nota Fiscal Emitida'; formHtml = getNotasEmitidasFormHTML(data); break;
                 case 'comprovantes': 
                     title = 'Upload de Comprovante (Imagem/PDF)'; 
@@ -568,16 +524,13 @@
             modalTitle.textContent = title;
             modalFormContainer.innerHTML = formHtml;
             
-            // --- Handlers de Formulário ---
             if (collectionName === 'faturamento') document.getElementById('modal-form').onsubmit = handleFaturamentoSubmit;
             if (collectionName === 'despesas') document.getElementById('modal-form').onsubmit = handleDespesasSubmit;
-            if (collectionName === 'prolabore') document.getElementById('modal-form').onsubmit = handleProLaboreSubmit;
             if (collectionName === 'notasemitidas') document.getElementById('modal-form').onsubmit = handleNotasEmitidasSubmit;
             if (collectionName === 'estoque') document.getElementById('modal-form').onsubmit = handleEstoqueSubmit;
             if (collectionName === 'das') document.getElementById('modal-form').onsubmit = handleDasSubmit;
             if (collectionName === 'comprovantes') setupComprovantesDragDrop();
 
-            // Preenche a data se não estiver em edição (data vazia)
             if (!data.id) {
                 const today = new Date().toISOString().split('T')[0];
                 document.querySelectorAll('#modal-form input[type="date"]').forEach(input => input.value = today);
@@ -590,9 +543,6 @@
             }, 10);
         };
         
-        /**
-         * Função principal para abrir o modal de edição, buscando os dados do item.
-         */
         window.openEditModal = (collectionName, id) => {
             const data = window.state[collectionName].find(item => item.id === id);
             if (!data) {
@@ -611,7 +561,7 @@
             }, { once: true });
         };
         
-        // --- RENDERIZAÇÃO DE FORMULÁRIOS (MODIFICADOS PARA EDIÇÃO) ---
+        // --- RENDERIZAÇÃO DE FORMULÁRIOS ---
 
         const getInputClasses = () => 'p-3 rounded-lg bg-[#2a2a2a] border border-[#333] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm w-full';
         
@@ -621,7 +571,6 @@
             </button>
         `;
 
-        // MODIFICADO: Adicionado campo para comprovante e preenchimento de dados
         const getFaturamentoFormHTML = (data = {}) => {
             const idInput = data.id ? `<input type="hidden" name="id" value="${data.id}">` : '';
             const oldComprovanteIdInput = data.comprovanteId ? `<input type="hidden" name="oldComprovanteId" value="${data.comprovanteId}">` : '';
@@ -672,10 +621,10 @@
             `;
         };
 
-        // MODIFICADO: Adicionado campo para comprovante e preenchimento de dados
         const getDespesasFormHTML = (data = {}) => {
             const idInput = data.id ? `<input type="hidden" name="id" value="${data.id}">` : '';
             const oldComprovanteIdInput = data.comprovanteId ? `<input type="hidden" name="oldComprovanteId" value="${data.comprovanteId}">` : '';
+            const isLucroRetirado = data.isLucroRetirado || false;
 
             return `
                 <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -688,7 +637,7 @@
                     <div>
                         <label for="des-tipo" class="block text-sm font-medium text-gray-400 mb-1">Tipo de Despesa</label>
                         <select name="tipo" id="des-tipo" class="${getInputClasses()}">
-                            ${['Aluguel', 'Serviços', 'Marketing', 'Impostos', 'Contabilidade', 'Outros'].map(opt => 
+                            ${['Aluguel', 'Serviços', 'Marketing', 'Impostos', 'Contabilidade', 'Retirada de Lucro', 'Outros'].map(opt => 
                                 `<option value="${opt}" ${data.tipo === opt ? 'selected' : ''}>${opt}</option>`
                             ).join('')}
                         </select>
@@ -709,6 +658,16 @@
                         <label for="des-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor (R$)</label>
                         <input type="number" step="0.01" name="valor" id="des-valor" placeholder="50.00" required value="${data.valor || ''}" class="${getInputClasses()}">
                     </div>
+                    
+                    <div class="col-span-full flex items-center mt-2 p-3 rounded-lg bg-[#222]">
+                        <input type="checkbox" name="isLucroRetirado" id="des-lucro-retirado" 
+                            ${isLucroRetirado ? 'checked' : ''} 
+                            class="h-4 w-4 text-yellow-500 rounded border-gray-500 focus:ring-yellow-500 bg-[#2a2a2a]">
+                        <label for="des-lucro-retirado" class="ml-2 block text-sm font-medium text-yellow-400">
+                            Marcar como Retirada de Lucro Pessoal (Saída de Capital)
+                        </label>
+                    </div>
+
                     <div>
                         <label for="des-comprovante" class="block text-sm font-medium text-gray-400 mb-1">Anexar Comprovante (Opcional)</label>
                         <select name="comprovanteId" id="des-comprovante" class="${getInputClasses()}">
@@ -718,32 +677,12 @@
                             <i class="ph-bold ph-paperclip"></i> Adicionar novo arquivo?
                         </button>
                     </div>
-                    ${getSubmitButton(data.id ? 'Atualizar Despesa' : 'Salvar Despesa', data.id ? 'ph-check' : 'ph-trend-down')}
+
+                    ${getSubmitButton(data.id ? 'Atualizar Despesa' : 'Salvar Despesa/Retirada', data.id ? 'ph-check' : 'ph-trend-down')}
                 </form>
             `;
         };
-        
-        // MODIFICADO: Preenchimento de dados
-        const getProLaboreFormHTML = (data = {}) => `
-            <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
-                <div>
-                    <label for="pl-data" class="block text-sm font-medium text-gray-400 mb-1">Data da Retirada</label>
-                    <input type="date" name="data" id="pl-data" required value="${data.data || ''}" class="${getInputClasses()}">
-                </div>
-                <div>
-                    <label for="pl-valor" class="block text-sm font-medium text-gray-400 mb-1">Valor Retirado (R$)</label>
-                    <input type="number" step="0.01" name="valor" id="pl-valor" placeholder="1000.00" required value="${data.valor || ''}" class="${getInputClasses()}">
-                </div>
-                <div class="col-span-full">
-                    <label for="pl-descricao" class="block text-sm font-medium text-gray-400 mb-1">Descrição (Ex: Retirada Mensal, Adiantamento)</label>
-                    <input type="text" name="descricao" id="pl-descricao" required value="${data.descricao || ''}" class="${getInputClasses()}">
-                </div>
-                ${getSubmitButton(data.id ? 'Atualizar Retirada' : 'Registrar Retirada', data.id ? 'ph-check' : 'ph-wallet-fill')}
-            </form>
-        `;
 
-        // MODIFICADO: Preenchimento de dados
         const getNotasEmitidasFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
@@ -771,7 +710,6 @@
             </form>
         `;
 
-        // MODIFICADO: Preenchimento de dados
         const getEstoqueFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
@@ -791,7 +729,6 @@
             </form>
         `;
 
-        // MODIFICADO: Preenchimento de dados
         const getDasFormHTML = (data = {}) => `
             <form id="modal-form" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 ${data.id ? `<input type="hidden" name="id" value="${data.id}">` : ''}
@@ -811,7 +748,6 @@
             </form>
         `;
 
-        // Formulário de Upload de Comprovantes (inalterado)
         const getComprovantesFormHTML = () => `
             <form id="modal-form" onsubmit="event.preventDefault()">
                 <div id="dropArea" class="drop-area flex flex-col items-center justify-center p-8 rounded-lg cursor-pointer transition-all">
@@ -827,9 +763,8 @@
             </form>
         `;
 
-        // --- SUBMIT HANDLERS (MODIFICADOS PARA EDIÇÃO E VÍNCULO) ---
+        // --- SUBMIT HANDLERS ---
         
-        // MODIFICADO: Inclui tratamento para ID, comprovanteId e oldComprovanteId
         const handleFaturamentoSubmit = async (e) => {
             e.preventDefault();
             const form = e.target;
@@ -858,7 +793,6 @@
             }
         };
 
-        // MODIFICADO: Inclui tratamento para ID, comprovanteId e oldComprovanteId
         const handleDespesasSubmit = async (e) => {
             e.preventDefault();
             const form = e.target;
@@ -866,11 +800,13 @@
             const id = form.id?.value || null;
             const oldComprovanteId = form.oldComprovanteId?.value || null;
             const newComprovanteId = form.comprovanteId.value || null;
+            const isLucroRetirado = form.isLucroRetirado.checked;
 
             const newEntry = {
                 data: form.data.value, tipo: form.tipo.value, descricao: form.descricao.value,
                 pagamento: form.pagamento.value, valor: parseFloat(form.valor.value),
                 comprovanteId: newComprovanteId || null,
+                isLucroRetirado: isLucroRetirado, // NOVO CAMPO
             };
             
             const savedDocId = await saveDocument('despesas', newEntry, id);
@@ -883,19 +819,6 @@
             }
         };
         
-        // MODIFICADO: Inclui tratamento para ID
-        const handleProLaboreSubmit = (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const id = form.id?.value || null;
-
-            const newEntry = {
-                data: form.data.value, descricao: form.descricao.value, valor: parseFloat(form.valor.value),
-            };
-            saveDocument('prolabore', newEntry, id).then(() => window.closeModal());
-        };
-        
-        // MODIFICADO: Inclui tratamento para ID
         const handleNotasEmitidasSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
@@ -908,7 +831,6 @@
             saveDocument('notasemitidas', newEntry, id).then(() => window.closeModal());
         };
 
-        // MODIFICADO: Inclui tratamento para ID
         const handleEstoqueSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
@@ -921,7 +843,6 @@
                 item: form.item.value, quantidade: quantidade, custoUnitario: custoUnitario, total: total,
             };
             
-            // Lógica de update/insert baseada no ID ou no nome do item
             if (id) {
                 saveDocument('estoque', newItem, id).then(() => window.closeModal());
             } else {
@@ -930,7 +851,6 @@
             }
         };
 
-        // MODIFICADO: Inclui tratamento para ID
         const handleDasSubmit = (e) => {
             e.preventDefault();
             const form = e.target;
@@ -956,13 +876,11 @@
             
             if (!dropArea || !fileInput) return;
 
-            // Limpa handlers antigos antes de adicionar novos
             dropArea.onclick = () => fileInput.click(); 
 
             fileInput.onchange = (e) => {
                 if (e.target.files.length > 0) {
                     handleFileUpload(e.target.files[0]); 
-                    // Reset do input para permitir upload do mesmo arquivo
                     e.target.value = '';
                 }
             };
@@ -1010,32 +928,27 @@
             
             const fileName = file.name;
             const timestamp = Date.now();
-            // O caminho de Storage usa o userId para garantir que cada usuário tenha sua própria pasta
             const storagePath = `comprovantes/${userId}/${timestamp}_${fileName}`; 
             const storageRef = ref(storage, storagePath);
 
             uploadStatus.textContent = `Iniciando upload de ${fileName}...`;
             progressBarContainer.classList.remove('hidden');
-            progressBar.style.width = '0%'; // Garante que a barra comece do zero
+            progressBar.style.width = '0%'; 
 
-            // Usando uploadBytesResumable para rastrear o progresso
             const uploadTask = uploadBytesResumable(storageRef, file);
 
             uploadTask.on('state_changed', 
                 (snapshot) => {
-                    // 1. Monitora o progresso
                     const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
                     progressBar.style.width = progress.toFixed(0) + '%';
                     uploadStatus.textContent = `Upload: ${progress.toFixed(0)}% concluído...`;
                 }, 
                 (error) => {
-                    // 2. Trata Erros 
                     console.error("Erro no upload ou Storage Rules:", error);
                     showToast(`Falha no upload! Erro: ${error.code} (Verifique Regras de Segurança do Storage)`, 'error');
                     progressBarContainer.classList.add('hidden');
                 }, 
                 async () => {
-                    // 3. Conclusão do Upload
                     try {
                         const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
 
@@ -1069,14 +982,9 @@
             );
         }
         
-        /**
-         * Abre a URL do comprovante em uma nova aba.
-         * @param {string} comprovanteId ID do documento de comprovante no Firestore.
-         */
         window.openLinkedComprovante = (comprovanteId) => {
             const comprovante = state.comprovantes.find(c => c.id === comprovanteId);
             if (comprovante && comprovante.url) {
-                // Decodificação para lidar com URLs de Storage que podem ter caracteres especiais
                 window.open(decodeURIComponent(comprovante.url), '_blank');
             } else {
                 showToast('URL do comprovante não encontrada.', 'error');
@@ -1084,21 +992,25 @@
         };
 
 
-        // --- FUNÇÃO AUXILIAR: ESTRUTURA PARA EXPORTAÇÃO PDF ---
+        // --- FUNÇÃO AUXILIAR: ESTRUTURA PARA EXPORTAÇÃO PDF (ATUALIZADA) ---
         
-        // NOVO: Função auxiliar para gerar a tabela de KPIs para o Dashboard PDF
         const getDashboardKpiTable = (kpis) => {
             return {
                 headers: ["Indicador", "Valor (R$)", "Observação"],
                 body: [
-                    ["Faturamento Total (Recebido)", formatCurrency(kpis.faturamentoTotal), "Total de todas as formas de pagamento"],
-                    [{ content: 'Caixa da Conta (Digital)', styles: { fontStyle: 'bold', fillColor: [230, 230, 255] } }, formatCurrency(kpis.caixaConta), "Pix, Cartão, Boleto, etc."],
-                    [{ content: 'Caixa Físico (Dinheiro)', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.caixaFisico), "Somente Receitas em Dinheiro"],
-                    ["Despesas Totais (Custos + Op.)", formatCurrency(kpis.despesasTotais), "Soma de Custos de Venda e Despesas Operacionais"],
-                    ["Lucro Líquido (ANTES Pró-Labore)", formatCurrency(kpis.lucroLiquido), kpis.lucroLiquido >= 0 ? "Resultado Positivo antes de Retiradas" : "Resultado Negativo antes de Retiradas"],
-                    [{ content: 'PRÓ-LABORE RETIRADO', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.proLaboreTotal), `Representa ${kpis.proLaborePercent.toFixed(2)}% do Faturamento`],
-                    [{ content: 'LUCRO FINAL APÓS PRÓ-LABORE', styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, 
-                     { content: formatCurrency(kpis.lucroLiquidoFinal), styles: { fontStyle: 'bold', fillColor: kpis.lucroLiquidoFinal >= 0 ? [200, 255, 220] : [255, 230, 230] } }, "Resultado Final do Período"],
+                    [{ content: 'FATURAMENTO GERAL (BRUTO)', styles: { fontStyle: 'bold', fillColor: [200, 255, 220] } }, formatCurrency(kpis.faturamentoTotal), "Total de todas as vendas e receitas."],
+                    ["Despesa Geral (Total Saídas)", formatCurrency(kpis.despesaGeral), "Custos + Despesas Operacionais + Lucro Retirado."],
+                    
+                    // Lucro Real e Suposto
+                    [{ content: 'LUCRO REAL (Antes da Retirada)', styles: { fontStyle: 'bold', fillColor: [230, 255, 255] } }, formatCurrency(kpis.lucroReal), "Faturamento - Custos e Despesas Operacionais Base."],
+                    ["Lucro Suposto (Regra 33% MEI)", formatCurrency(kpis.lucroSuposto), "Estimativa de lucro sugerido pela regra MEI (33% do Faturamento Bruto)."],
+                    
+                    // Fluxos de Caixa Líquido
+                    [{ content: 'Caixa Físico Líquido', styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } }, formatCurrency(kpis.caixaFisicoLiquido), "Dinheiro recebido - Dinheiro gasto."],
+                    [{ content: 'Valor em Conta Líquido (Digital)', styles: { fontStyle: 'bold', fillColor: [230, 230, 255] } }, formatCurrency(kpis.caixaContaLiquido), "Entradas Digitais - Saídas Digitais."],
+
+                    [{ content: 'LUCRO RETIRADO (Saída de Capital)', styles: { fontStyle: 'bold', fillColor: [255, 230, 230] } }, formatCurrency(kpis.lucroRetiradoTotal), "Total de despesas marcadas como Retirada de Lucro."],
+
                 ]
             };
         };
@@ -1110,7 +1022,6 @@
             let totalRow = null;
             let dateKey = 'data';
             
-            // Define a estrutura e formata os dados
             switch (collectionName) {
                 case 'faturamento':
                     dateKey = 'data';
@@ -1144,7 +1055,7 @@
 
                 case 'despesas':
                     dateKey = 'data';
-                    headers.push("Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)");
+                    headers.push("Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)", "Retirada?");
                     
                     data.forEach(item => {
                         body.push([
@@ -1153,35 +1064,18 @@
                             item.descricao,
                             item.pagamento,
                             formatCurrency(parseFloat(item.valor || 0)),
+                            item.isLucroRetirado ? 'SIM' : 'NÃO',
                         ]);
                     });
 
                     const totalDespesas = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
                     totalRow = [
-                        { content: 'TOTAL DE DESPESAS NO PERÍODO:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
+                        { content: 'TOTAL DE SAÍDAS NO PERÍODO:', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } },
                         { content: formatCurrency(totalDespesas), styles: { fontStyle: 'bold', fillColor: [255, 230, 230] } },
+                        { content: '', colSpan: 1 } // Retirada?
                     ];
                     break;
                     
-                case 'prolabore':
-                    dateKey = 'data';
-                    headers.push("Data", "Descrição", "Valor Retirado (R$)");
-                    
-                    data.forEach(item => {
-                        body.push([
-                            item.data ? new Date(item.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-',
-                            item.descricao,
-                            formatCurrency(parseFloat(item.valor || 0)),
-                        ]);
-                    });
-
-                    const totalProlabore = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-                    totalRow = [
-                        { content: 'TOTAL DE PRÓ-LABORE NO PERÍODO:', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
-                        { content: formatCurrency(totalProlabore), styles: { fontStyle: 'bold', fillColor: [255, 255, 200] } },
-                    ];
-                    break;
-
                 case 'notasemitidas':
                     dateKey = 'dataEmissao';
                     headers.push("Emissão", "Nº NF", "Cliente", "Descrição", "Valor (R$)");
@@ -1204,7 +1098,7 @@
                     break;
                     
                 case 'estoque':
-                    dateKey = 'item'; // Não usado, mas necessário
+                    dateKey = 'item'; 
                     headers.push("Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)");
                     
                     data.forEach(item => {
@@ -1253,7 +1147,7 @@
         };
 
 
-        // --- FUNÇÃO DE EXPORTAÇÃO PARA PDF (REFACTOR COM SUPORTE A DASHBOARD) ---
+        // --- FUNÇÃO DE EXPORTAÇÃO PARA PDF ---
         window.exportToPDF = async (collectionName, title) => {
             const exportButton = document.getElementById(`export-pdf-btn-${collectionName}`);
             const originalText = exportButton.innerHTML;
@@ -1263,21 +1157,18 @@
 
             try {
                 const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('l', 'mm', 'a4'); // Usa 'l' (landscape) para mais espaço
+                const pdf = new jsPDF('l', 'mm', 'a4');
                 const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
                 let fileName = `${collectionName}_Relatorio_${date}.pdf`;
 
                 if (collectionName === 'dashboard') {
-                    // =========================================================
                     // LÓGICA DE EXPORTAÇÃO DO DASHBOARD
-                    // =========================================================
                     const monthYearFilter = document.getElementById(`dashboard-month-year`)?.value;
                     const kpis = calculateKPIs(monthYearFilter);
                     const kpiTableData = getDashboardKpiTable(kpis);
                     
-                    fileName = `Dashboard_Relatorio_MEI_${monthYearFilter || date}.pdf`;
+                    fileName = `Dashboard_MEI_Relatorio_${monthYearFilter || date}.pdf`;
 
-                    // 1. Título e Metadata
                     pdf.setFontSize(20);
                     pdf.setTextColor(40, 40, 40);
                     pdf.text(`Relatório MEI: ${title}`, 15, 20);
@@ -1287,7 +1178,6 @@
                     pdf.text(filterInfo, 15, 28);
                     pdf.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 15, 33);
                     
-                    // 2. Tabela de KPIs
                     pdf.setFontSize(14);
                     pdf.text("Resumo de Indicadores Chave (KPIs)", 15, 45);
 
@@ -1311,10 +1201,7 @@
                     return; 
                 }
                 
-                // =========================================================
                 // LÓGICA DE EXPORTAÇÃO DE OUTRAS COLEÇÕES
-                // =========================================================
-
                 const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
                 const monthYearFilter = document.getElementById(`${collectionName}-month-year`)?.value;
                 const searchFilter = document.getElementById(`${collectionName}-search`)?.value;
@@ -1327,7 +1214,6 @@
                 
                 const { headers, body, totalRow } = getExportTableStructure(collectionName, filteredData);
                 
-                // Título e Metadata
                 pdf.setFontSize(20);
                 pdf.setTextColor(40, 40, 40);
                 pdf.text(`Relatório MEI: ${title}`, 15, 20);
@@ -1342,25 +1228,21 @@
                     finalBody.push(totalRow);
                 }
 
-                // AutoTable (Geração da Tabela)
                 pdf.autoTable({
                     head: [headers],
                     body: finalBody,
                     startY: 40,
-                    theme: 'striped', // Tema profissional e limpo
+                    theme: 'striped',
                     styles: { fontSize: 8, cellPadding: 2, textColor: [50, 50, 50] },
                     headStyles: { fillColor: [200, 200, 200], textColor: [0, 0, 0], fontStyle: 'bold' },
                     margin: { top: 10, right: 15, bottom: 10, left: 15 },
-                    // Footer/Header para numeração de página
                     didDrawPage: function(data) {
                         pdf.setFontSize(8);
                         const pageCount = pdf.internal.getNumberOfPages();
-                        // Footer
                         pdf.text(`Página ${data.pageNumber} de ${pageCount}`, data.settings.margin.left, pdf.internal.pageSize.height - 10);
                     }
                 });
 
-                // Salvar (Baixar para a memória do dispositivo)
                 pdf.save(fileName);
 
                 showToast(`PDF '${fileName}' gerado e baixado!`, 'success');
@@ -1375,7 +1257,7 @@
         };
 
 
-        // --- RENDERIZAÇÃO DE TABELAS (MODIFICADA PARA BOTÃO DE EXPORTAR) ---
+        // --- RENDERIZAÇÃO DE TABELAS ---
 
         const renderControls = (collectionName, title) => {
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
@@ -1424,11 +1306,14 @@
                 return `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum registro encontrado.</div>`;
             }
             
-            // Adiciona coluna de comprovante para Faturamento e Despesas
             const addComprovanteColumn = collectionName === 'faturamento' || collectionName === 'despesas';
             const extraHeader = addComprovanteColumn ? `<th class="p-3 text-center font-medium w-16">Arq.</th>` : '';
+            
+            // Coluna extra para Despesas (Retirada?)
+            const isDespesas = collectionName === 'despesas';
+            const extraDespesaHeader = isDespesas ? `<th class="p-3 text-center font-medium w-20">Retirada?</th>` : '';
 
-            // Renderiza cabeçalho dentro de THEAD
+
             const headerHTML = headers.map(h => `<th class="p-3 text-left font-medium">${h}</th>`).join('');
             
             const rowsHTML = filteredData.map(item => {
@@ -1439,7 +1324,6 @@
 
                     if (key.includes('data') || key.includes('Data') || key.includes('pagoEm') || key === 'mesReferencia') {
                         if (key === 'mesReferencia' && value) {
-                            // Formata YYYY-MM para Mês/Ano
                             const [year, month] = value.split('-');
                             displayValue = `${month}/${year}`;
                         } else {
@@ -1449,8 +1333,7 @@
                         if (collectionName === 'faturamento' && key === 'valor') colorClass = 'neon-text';
                         if (collectionName === 'faturamento' && key === 'custo') colorClass = 'text-red-400';
                         if (collectionName === 'faturamento' && key === 'lucro') colorClass = parseFloat(item[key] || 0) >= 0 ? 'neon-text' : 'text-red-400';
-                        if (collectionName === 'despesas' && key === 'valor') colorClass = 'text-red-400';
-                        if (collectionName === 'prolabore' && key === 'valor') colorClass = 'text-yellow-400';
+                        if (collectionName === 'despesas' && key === 'valor') colorClass = item.isLucroRetirado ? 'text-yellow-400' : 'text-red-400';
                         if (collectionName === 'notasemitidas' && key === 'valor') colorClass = 'text-indigo-400';
                         displayValue = formatCurrency(parseFloat(value || 0));
                     } else if (key === 'numeroNF') {
@@ -1471,6 +1354,14 @@
                     
                     comprovanteCell = `<td class="p-3 border-t border-[#333] text-center">${iconButton}</td>`;
                 }
+                
+                let extraDespesaCell = '';
+                if (isDespesas) {
+                    const status = item.isLucroRetirado ? 
+                        `<span class="text-yellow-400 font-bold">SIM</span>` : 
+                        `<span class="text-gray-500">NÃO</span>`;
+                    extraDespesaCell = `<td class="p-3 border-t border-[#333] text-center">${status}</td>`;
+                }
 
 
                 const actionsHTML = `
@@ -1488,12 +1379,10 @@
                     </td>
                 `;
 
-                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${comprovanteCell}${actionsHTML}</tr>`;
+                return `<tr class="hover:bg-[#1f1f1f] transition duration-150">${cellHTML}${extraDespesaCell}${comprovanteCell}${actionsHTML}</tr>`;
             }).join('');
             
             let totalRowHTML = '';
-            let totalValue = 0;
-            let totalClass = 'text-white';
             let totalColspan = dataKeys.length; 
             
             if (collectionName === 'faturamento') {
@@ -1511,33 +1400,22 @@
                     </tr>
                 `;
             } else if (collectionName === 'despesas') {
-                totalValue = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-                totalClass = 'text-red-400';
+                const totalDespesas = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
                 totalRowHTML = `
                     <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
-                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE DESPESAS NO PERÍODO:</td>
-                        <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
+                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE SAÍDAS NO PERÍODO:</td>
+                        <td class="p-3 text-red-400">${formatCurrency(totalDespesas)}</td>
+                        <td class="p-3"></td> <!-- Coluna Retirada? -->
                         ${addComprovanteColumn ? '<td></td>' : ''}
                         <td class="p-3"></td>
                     </tr>
                 `;
-            } else if (collectionName === 'prolabore') {
-                totalValue = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-                totalClass = 'text-yellow-400';
-                totalRowHTML = `
-                    <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
-                        <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE PRÓ-LABORE NO PERÍODO:</td>
-                        <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
-                        <td class="p-3"></td>
-                    </tr>
-                `;
             } else if (collectionName === 'notasemitidas') {
-                totalValue = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-                totalClass = 'text-indigo-400';
+                const totalNotas = filteredData.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
                 totalRowHTML = `
                     <tr class="font-bold text-base bg-[#282828] border-b-2 border-t-2 border-[#333]">
                         <td class="p-3 text-white" colspan="${totalColspan - 1}">TOTAL DE NOTAS EMITIDAS NO PERÍODO:</td>
-                        <td class="p-3 ${totalClass}">${formatCurrency(totalValue)}</td>
+                        <td class="p-3 text-indigo-400">${formatCurrency(totalNotas)}</td>
                         <td class="p-3"></td>
                     </tr>
                 `;
@@ -1547,10 +1425,10 @@
                 <div class="overflow-x-auto custom-scrollbar shadow-lg rounded-xl card mb-6 border border-[#333]">
                     <table class="min-w-full table-auto text-sm">
                         <thead class="bg-[#282828]">
-                            <tr>${headerHTML}${extraHeader}<th class="p-3 text-right font-medium w-32">Ações</th></tr>
+                            <tr>${headerHTML}${extraDespesaHeader}${extraHeader}<th class="p-3 text-right font-medium w-32">Ações</th></tr>
                         </thead>
                         <tbody>
-                            ${rowsHTML.length > 0 && collectionName !== 'comprovantes' && totalRowHTML}
+                            ${rowsHTML.length > 0 && totalRowHTML}
                             ${rowsHTML}
                         </tbody>
                     </table>
@@ -1558,7 +1436,7 @@
             `;
         };
         
-        // --- FUNÇÕES DE RENDERIZAÇÃO DE TELA (MODIFICADA PARA USAR CONTAINER DE EXPORTAÇÃO) ---
+        // --- FUNÇÕES DE RENDERIZAÇÃO DE TELA ---
 
         const renderFaturamento = () => {
             const tabEl = document.getElementById('faturamento');
@@ -1573,22 +1451,12 @@
         const renderDespesas = () => {
             const tabEl = document.getElementById('despesas');
             const data = state.despesas;
-            const headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"];
+            // Inclui "Retirada?" no cabeçalho
+            const headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"]; 
             const dataKeys = ["data", "tipo", "descricao", "pagamento", "valor"];
             const valueColumns = ["valor"];
-            const title = "Registro de Despesas Operacionais";
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('despesas', title)}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Despesas</h3><div id="despesas-export-container"><div id="despesas-table-container">${createTableHTML('despesas', data, headers, dataKeys, valueColumns)}</div></div>`;
-        };
-        
-        const renderProLabore = () => {
-            const tabEl = document.getElementById('prolabore');
-            const data = state.prolabore;
-            const headers = ["Data", "Descrição", "Valor Retirado (R$)"];
-            const dataKeys = ["data", "descricao", "valor"];
-            const valueColumns = ["valor"];
-            const title = "Controle de Pró-Labore (Retiradas do Sócio)";
-            const totalProlabore = data.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('prolabore', title)}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333] border-b-4 border-yellow-500"><p class="text-sm font-medium text-gray-400">Total Retirado Acumulado:</p><p class="text-3xl font-bold mt-1 text-yellow-400">${formatCurrency(totalProlabore)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Retiradas</h3><div id="prolabore-export-container"><div id="prolabore-table-container">${createTableHTML('prolabore', data, headers, dataKeys, valueColumns)}</div></div>`;
+            const title = "Registro de Saídas (Despesas e Retiradas de Lucro)";
+            tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('despesas', title)}<h3 class="text-xl font-semibold mb-3 neon-text">Histórico de Saídas</h3><div id="despesas-export-container"><div id="despesas-table-container">${createTableHTML('despesas', data, headers, dataKeys, valueColumns)}</div></div>`;
         };
         
         const renderNotasEmitidas = () => {
@@ -1658,7 +1526,6 @@
                     : `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">${comprovanteCardsHTML}</div>`
                 }
             `;
-            // Não há exportação de PDF para esta tela, pois o conteúdo é um grid de cards, não uma tabela de dados
         };
 
         const renderEstoque = () => {
@@ -1670,7 +1537,6 @@
             const title = "Controle de Estoque";
             const totalEstoqueValor = data.reduce((sum, item) => sum + parseFloat(item.total || 0), 0);
             tabEl.innerHTML = `<h2 class="text-2xl font-semibold mb-6 neon-text">${title}</h2>${renderControls('estoque', title)}<div class="card p-4 mb-6 rounded-xl text-center border border-[#333]"><p class="text-sm font-medium text-gray-400">Valor Total do Estoque:</p><p class="text-3xl font-bold mt-1 neon-text">${formatCurrency(totalEstoqueValor)}</p></div><h3 class="text-xl font-semibold mb-3 neon-text">Inventário Atual</h3><div id="estoque-export-container"><div id="estoque-table-container">${createTableHTML('estoque', data, headers, dataKeys, valueColumns)}</div></div>`;
-             // Remove o botão de FAB da aba estoque
             fabButton.classList.add('hidden');
         };
 
@@ -1685,47 +1551,75 @@
         };
 
 
-        // --- DASHBOARD AND CHART LOGIC ---
+        // --- DASHBOARD AND CHART LOGIC (ATUALIZADO) ---
         
-        // MODIFICADO: Inclui cálculo de Caixa Físico e Caixa Conta
         const calculateKPIs = (monthYearFilter) => {
             const filteredFaturamento = filterDataByMonthYear(state.faturamento, 'data', monthYearFilter);
             const filteredDespesas = filterDataByMonthYear(state.despesas, 'data', monthYearFilter);
-            const filteredProlabore = filterDataByMonthYear(state.prolabore, 'data', monthYearFilter);
 
             const faturamentoTotal = filteredFaturamento.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
-            const despesasOperacionais = filteredDespesas.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
             const custosFaturamento = filteredFaturamento.reduce((sum, item) => sum + parseFloat(item.custo || 0), 0);
-            const proLaboreTotal = filteredProlabore.reduce((sum, item) => sum + parseFloat(item.valor || 0), 0);
             
-            // NOVO: Cálculo de Caixa Físico (Dinheiro) e Caixa Conta (Outros)
-            let caixaFisico = 0;
-            let caixaConta = 0;
+            let despesasOperacionais = 0; // Despesas que NÃO são retirada de lucro
+            let lucroRetiradoTotal = 0;    // Total marcado como retirada
+            let despesasDinheiro = 0;
+            let despesasDigitais = 0;
+
+            filteredDespesas.forEach(item => {
+                const valor = parseFloat(item.valor || 0);
+                
+                if (item.isLucroRetirado) {
+                    lucroRetiradoTotal += valor;
+                } else {
+                    despesasOperacionais += valor;
+                }
+
+                const pagamento = item.pagamento || '';
+                if (pagamento === 'Dinheiro') {
+                    despesasDinheiro += valor;
+                } else {
+                    despesasDigitais += valor;
+                }
+            });
+
+            // 1. Despesa Geral (Total Saídas)
+            const despesaGeral = despesasOperacionais + custosFaturamento + lucroRetiradoTotal;
+
+            // 2. Despesa Operacional Base (Custos e Despesas que não são retirada)
+            const despesaOperacionalBase = despesasOperacionais + custosFaturamento;
+
+            // 3. Lucro Real (Faturamento - Despesa Operacional Base)
+            const lucroReal = faturamentoTotal - despesaOperacionalBase;
+
+            // 4. Lucro Suposto (33%)
+            const lucroSuposto = faturamentoTotal * 0.33;
+
+            // 5. Fluxo de Caixa Faturamento separation
+            let faturamentoDinheiro = 0;
+            let faturamentoDigital = 0;
 
             filteredFaturamento.forEach(item => {
                 const valor = parseFloat(item.valor || 0);
                 if (item.pagamento === 'Dinheiro') {
-                    caixaFisico += valor;
+                    faturamentoDinheiro += valor;
                 } else {
-                    caixaConta += valor;
+                    faturamentoDigital += valor;
                 }
             });
 
-            const despesasTotais = despesasOperacionais + custosFaturamento;
-            const lucroLiquido = faturamentoTotal - despesasTotais;
-            const lucroLiquidoFinal = lucroLiquido - proLaboreTotal;
+            // 6. Caixa Líquido
+            const caixaFisicoLiquido = faturamentoDinheiro - despesasDinheiro;
+            const caixaContaLiquido = faturamentoDigital - despesasDigitais;
 
-            const proLaborePercent = faturamentoTotal > 0 ? (proLaboreTotal / faturamentoTotal) * 100 : 0;
-            
+
             return { 
                 faturamentoTotal, 
-                despesasTotais, 
-                lucroLiquido, 
-                proLaboreTotal, 
-                lucroLiquidoFinal, 
-                proLaborePercent,
-                caixaFisico, // NOVO
-                caixaConta,  // NOVO
+                despesaGeral,
+                lucroReal,
+                lucroSuposto,
+                lucroRetiradoTotal,
+                caixaFisicoLiquido,
+                caixaContaLiquido,
             };
         };
 
@@ -1751,25 +1645,30 @@
             
             const filteredFaturamento = filterDataByMonthYear(state.faturamento, dateKey, dashboardMonthYearFilter);
             const filteredDespesas = filterDataByMonthYear(state.despesas, dateKey, dashboardMonthYearFilter);
-            const filteredProlabore = filterDataByMonthYear(state.prolabore, dateKey, dashboardMonthYearFilter);
 
             const aggregateData = (data, targetKey, isCost = false) => {
                 data.forEach(item => {
                     const key = getGroupKey(item[dateKey]);
-                    if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesas: 0, prolabore: 0 };
+                    if (!aggregated[key]) aggregated[key] = { faturamento: 0, despesasOperacionais: 0, lucroRetirado: 0 };
                     
-                    if (isCost) {
-                        aggregated[key][targetKey] += parseFloat(item.custo || 0); 
+                    const valor = parseFloat(item.valor || 0);
+                    
+                    if (targetKey === 'faturamento') {
+                         aggregated[key].faturamento += valor;
+                    } else if (isCost) {
+                        aggregated[key].despesasOperacionais += parseFloat(item.custo || 0); // Custos de Venda
+                    } else if (item.isLucroRetirado) {
+                        aggregated[key].lucroRetirado += valor;
                     } else {
-                        aggregated[key][targetKey] += parseFloat(item.valor || 0);
+                         aggregated[key].despesasOperacionais += valor; // Despesas Operacionais (não-retirada)
                     }
                 });
             };
 
             aggregateData(filteredFaturamento, 'faturamento');
-            aggregateData(filteredFaturamento, 'despesas', true); 
-            aggregateData(filteredDespesas, 'despesas');          
-            aggregateData(filteredProlabore, 'prolabore');        
+            aggregateData(filteredFaturamento, 'despesasOperacionais', true); // Adiciona custos de venda
+            aggregateData(filteredDespesas, 'despesasOperacionais');          
+            aggregateData(filteredDespesas, 'lucroRetirado');        
 
             const sortedKeys = Object.keys(aggregated).sort();
 
@@ -1780,8 +1679,8 @@
             });
             
             const faturamentoData = sortedKeys.map(key => aggregated[key].faturamento);
-            const despesasData = sortedKeys.map(key => aggregated[key].despesas);
-            const proLaboreData = sortedKeys.map(key => aggregated[key].prolabore);
+            const despesasOpData = sortedKeys.map(key => aggregated[key].despesasOperacionais);
+            const lucroRetiradoData = sortedKeys.map(key => aggregated[key].lucroRetirado);
             
             const chartData = {
                 labels: labels,
@@ -1795,8 +1694,8 @@
                         borderRadius: 4
                     },
                     {
-                        label: 'Despesas Totais (Custos + Op.)',
-                        data: despesasData,
+                        label: 'Despesas Operacionais + Custos',
+                        data: despesasOpData,
                         backgroundColor: 'rgba(255, 99, 132, 0.7)',
                         borderColor: 'rgb(255, 99, 132)',
                         borderWidth: 1,
@@ -1804,8 +1703,8 @@
                     },
                     {
                         type: 'line', 
-                        label: 'Pró-Labore',
-                        data: proLaboreData,
+                        label: 'Lucro Retirado',
+                        data: lucroRetiradoData,
                         borderColor: 'rgb(255, 221, 0)',
                         backgroundColor: 'rgba(255, 221, 0, 0.2)',
                         borderWidth: 3,
@@ -1851,13 +1750,13 @@
             chartInstance = new Chart(ctx, chartConfig);
         };
 
-        // MODIFICADO: Inclui Caixa Físico e Caixa Conta no Dashboard
         const renderDashboard = () => {
             const tabEl = document.getElementById('dashboard');
-            const { faturamentoTotal, despesasTotais, lucroLiquido, proLaboreTotal, lucroLiquidoFinal, proLaborePercent, caixaFisico, caixaConta } = calculateKPIs(state.dashboardMonthYearFilter);
+            const { faturamentoTotal, despesaGeral, lucroReal, lucroSuposto, lucroRetiradoTotal, caixaFisicoLiquido, caixaContaLiquido } = calculateKPIs(state.dashboardMonthYearFilter);
             
-            const profitNeonFinal = lucroLiquidoFinal >= 0 ? 'neon-text' : 'text-red-500';
-            const profitNeonLiquido = lucroLiquido >= 0 ? 'text-sky-400' : 'text-red-500';
+            const profitNeonReal = lucroReal >= 0 ? 'neon-text' : 'text-red-500';
+            const caixaFisicoColor = caixaFisicoLiquido >= 0 ? 'text-yellow-500' : 'text-red-500';
+            const caixaContaColor = caixaContaLiquido >= 0 ? 'text-blue-400' : 'text-red-500';
 
             const granularityOptions = [
                 { value: 'day', label: 'Dia' },
@@ -1868,9 +1767,8 @@
             tabEl.innerHTML = `
                 <h2 class="text-3xl font-bold mb-8 neon-text">Resumo Geral e Análise Financeira</h2>
 
-                <!-- Filtros e Ações do Dashboard (Inclui Exportação PDF) -->
+                <!-- Filtros e Exportação PDF -->
                 <div class="flex flex-col sm:flex-row gap-4 mb-8 card p-4 rounded-xl border border-[#333] justify-between items-start sm:items-end">
-                    <!-- Filtro por Mês/Ano -->
                     <div class="flex-grow w-full sm:w-auto">
                         <label for="dashboard-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar KPIs e Gráfico por Mês/Ano</label>
                         <div class="flex space-x-2">
@@ -1881,7 +1779,6 @@
                         </div>
                     </div>
                     
-                    <!-- Botão Exportar PDF -->
                     <div class="w-full sm:w-auto flex items-end">
                         <button id="export-pdf-btn-dashboard"
                                 onclick="exportToPDF('dashboard', 'Resumo Geral do Período')"
@@ -1892,7 +1789,52 @@
                     </div>
                 </div>
 
-                <!-- Controles de Granularidade do Gráfico -->
+                <!-- PRINCIPAIS KPIS (4 Indicadores de Faturamento/Despesa/Lucro Bruto) -->
+                <h3 class="text-2xl font-bold mb-4 text-sky-400">Indicadores de Lucro e Saída</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <!-- Faturamento Geral (Total) -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-[#00ff88]">
+                        <p class="text-sm uppercase text-gray-400 font-medium">1. Faturamento Geral</p>
+                        <p class="text-2xl font-bold mt-1 neon-text">${formatCurrency(faturamentoTotal)}</p>
+                    </div>
+                    <!-- Despesa Geral (Total Saídas) -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-red-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">2. Despesa Geral (Saídas)</p>
+                        <p class="text-2xl font-bold mt-1 text-red-500">${formatCurrency(despesaGeral)}</p>
+                    </div>
+                    <!-- Lucro Real (Após Despesas Op. Base) -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-sky-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">3. Lucro Real (Antes da Retirada)</p>
+                        <p class="text-2xl font-bold mt-1 ${profitNeonReal}">${formatCurrency(lucroReal)}</p>
+                    </div>
+                    <!-- Lucro Suposto (33%) -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-indigo-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">4. Lucro Suposto (33% MEI)</p>
+                        <p class="text-2xl font-bold mt-1 text-indigo-400">${formatCurrency(lucroSuposto)}</p>
+                    </div>
+                </div>
+
+                <!-- FLUXO DE CAIXA E RETIRADAS (3 Indicadores de Liquidez) -->
+                <h3 class="text-2xl font-bold mb-4 text-yellow-400">Análise de Fluxo de Caixa Líquido</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+                    <!-- Caixa Físico Líquido -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-yellow-700">
+                        <p class="text-sm uppercase text-gray-400 font-medium">5. Caixa Físico (Líquido)</p>
+                        <p class="text-3xl font-bold mt-1 ${caixaFisicoColor}">${formatCurrency(caixaFisicoLiquido)}</p>
+                    </div>
+                    <!-- Valor em Conta Líquido -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-blue-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">6. Valor em Conta (Líquido)</p>
+                        <p class="text-3xl font-bold mt-1 ${caixaContaColor}">${formatCurrency(caixaContaLiquido)}</p>
+                    </div>
+                    <!-- Lucro Retirado (Saída de Capital) -->
+                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-pink-500">
+                        <p class="text-sm uppercase text-gray-400 font-medium">7. Lucro Retirado (Total)</p>
+                        <p class="text-3xl font-bold mt-1 text-pink-400">${formatCurrency(lucroRetiradoTotal)}</p>
+                    </div>
+                </div>
+                
+                <!-- Gráfico Analítico -->
                 <div class="mb-8 card p-4 rounded-xl border border-[#333]">
                     <label for="dashboard-granularity-selector" class="block text-sm font-medium text-gray-400 mb-2">Granularidade do Gráfico (Análise Histórica)</label>
                     <div id="dashboard-granularity-selector" class="flex space-x-2">
@@ -1905,65 +1847,10 @@
                     `).join('')}
                     </div>
                 </div>
-                
-                <!-- KPIs (Key Performance Indicators) -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-                    <!-- Faturamento Total (Todos os Pagamentos) -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-[#00ff88] transition hover:shadow-neon">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Faturamento Total (Todos)</p>
-                        <p class="text-2xl font-bold mt-1 neon-text">${formatCurrency(faturamentoTotal)}</p>
-                    </div>
-                    <!-- Despesas Totais -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-red-500 transition hover:shadow-red-900">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Despesas Totais (Custos + Op.)</p>
-                        <p class="text-2xl font-bold mt-1 text-red-500">${formatCurrency(despesasTotais)}</p>
-                    </div>
-                    <!-- Lucro Líquido (Before Pró-Labore) -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-sky-500 transition hover:shadow-sky-900">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Lucro Líquido (ANTES PL)</p>
-                        <p class="text-2xl font-bold mt-1 ${profitNeonLiquido}">${formatCurrency(lucroLiquido)}</p>
-                    </div>
-                    <!-- Pró-Labore Total -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-yellow-500 transition hover:shadow-yellow-900">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Pró-Labore Total Retirado</p>
-                        <p class="text-2xl font-bold mt-1 text-yellow-400">${formatCurrency(proLaboreTotal)}</p>
-                    </div>
-                </div>
 
-                <!-- NOVO: KPIs de Caixa Físico e Conta -->
-                <h3 class="text-2xl font-bold mb-4 text-sky-400">Análise de Fluxo de Caixa (Faturamento Bruto)</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-                    <!-- Caixa Conta -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-blue-500 transition hover:shadow-blue-900">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Caixa da Conta (Entradas Digitais)</p>
-                        <p class="text-3xl font-bold mt-1 text-blue-400">${formatCurrency(caixaConta)}</p>
-                    </div>
-                    <!-- Caixa Físico -->
-                    <div class="card p-4 rounded-xl shadow-lg border-b-4 border-yellow-700 transition hover:shadow-yellow-900">
-                        <p class="text-sm uppercase text-gray-400 font-medium">Caixa Físico (Entradas em Dinheiro)</p>
-                        <p class="text-3xl font-bold mt-1 text-yellow-500">${formatCurrency(caixaFisico)}</p>
-                    </div>
-                </div>
-                
-                <!-- Resumo Final -->
-                <h3 class="text-2xl font-bold mb-4 neon-text">Resultado Final (Lucro Total)</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <!-- Lucro Líquido Final (Total) -->
-                    <div class="card p-6 rounded-xl shadow-lg border-b-4 ${lucroLiquidoFinal >= 0 ? 'border-[#00ff88]' : 'border-red-500'}">
-                        <p class="text-lg uppercase text-gray-400 font-medium">LUCRO LÍQUIDO TOTAL (Após PL)</p>
-                        <p class="text-5xl font-extrabold mt-2 ${profitNeonFinal}">${formatCurrency(lucroLiquidoFinal)}</p>
-                    </div>
-                    <!-- Pró-Labore como % do Faturamento -->
-                    <div class="card p-6 rounded-xl shadow-lg border-b-4 border-yellow-500">
-                        <p class="text-lg uppercase text-gray-400 font-medium">Pró-Labore como % do Faturamento</p>
-                        <p class="text-5xl font-extrabold mt-2 text-yellow-400">${proLaborePercent.toFixed(2)}%</p>
-                    </div>
-                </div>
-                
-                <!-- Gráfico Analítico -->
                 <div class="card p-6 rounded-xl shadow-lg border border-[#333]">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-                        <h3 class="text-xl font-semibold neon-text">Faturamento Recebido vs Custos/Despesas/Pró-Labore (Histórico)</h3>
+                        <h3 class="text-xl font-semibold neon-text">Faturamento vs Despesas Operacionais vs Lucro Retirado</h3>
                     </div>
                     <div style="height: 400px; width: 100%;">
                         <canvas id="analyticsChart"></canvas>
@@ -1989,47 +1876,45 @@
 
             if (tabName === 'faturamento') renderFaturamento();
             if (tabName === 'despesas') renderDespesas();
-            if (tabName === 'prolabore') renderProLabore();
             if (tabName === 'notasemitidas') renderNotasEmitidas();
-            if (tabName === 'comprovantes') renderComprovantes(); // NOVO
+            if (tabName === 'comprovantes') renderComprovantes();
             if (tabName === 'estoque') renderEstoque();
             if (tabName === 'das') renderDas();
             if (tabName === 'dashboard') renderDashboard();
             
-            // O FAB só é escondido para as abas Dashboard e Estoque
-            if (tabName === 'dashboard' || tabName === 'estoque' || tabName === 'comprovantes') {
+            // Controle do FAB
+            if (['dashboard', 'estoque'].includes(tabName)) {
                 fabButton.classList.add('hidden');
-                // Comprovantes usa o botão FAB para o upload
-                if (tabName === 'comprovantes') {
-                    fabButton.classList.remove('hidden');
-                }
             } else {
                 fabButton.classList.remove('hidden');
             }
             
-            // Otimização para garantir que o FAB clique no modal correto
-             if (tabName !== 'dashboard' && tabName !== 'estoque') {
+            if (tabName === 'comprovantes') {
+                fabButton.onclick = () => window.openEntryModal('comprovantes');
+            } else if (tabName !== 'dashboard' && tabName !== 'estoque') {
                  fabButton.onclick = () => window.openEntryModal(state.activeTab);
-             }
+            }
         };
 
         const setupEventListeners = () => {
             tabButtons.forEach(button => {
+                // Remove o listener para a aba prolabore, se existir (garantindo compatibilidade com o HTML inicial)
+                if (button.dataset.tab === 'prolabore') {
+                    button.remove();
+                    return;
+                }
                 button.addEventListener('click', (e) => {
                     const tabName = e.currentTarget.dataset.tab;
                     render(tabName);
                 });
             });
             
-            // Configuração inicial do FAB (vai ser sobrescrito pelo render)
             if (fabButton) {
                 fabButton.addEventListener('click', () => {
-                    // Usar a aba ativa para determinar qual modal abrir
                     window.openEntryModal(state.activeTab);
                 });
             }
             
-            // Exposição de funções globais (necessário no ambiente Canvas)
             window.deleteDocument = deleteDocument;
             window.handleSearchFilter = handleSearchFilter;
             window.clearMonthFilter = clearMonthFilter;
@@ -2039,9 +1924,8 @@
             window.openEntryModal = openEntryModal; 
             window.openEditModal = openEditModal; 
             window.openLinkedComprovante = openLinkedComprovante; 
-            window.exportToPDF = exportToPDF; // EXPONDO FUNÇÃO DE EXPORTAÇÃO
+            window.exportToPDF = exportToPDF; 
             
-            // Handlers de filtro do Dashboard
             window.handleDashboardMonthFilter = (value) => {
                 state.dashboardMonthYearFilter = value;
                 renderDashboard();
@@ -2062,7 +1946,6 @@
             
             let headers, dataKeys, valueColumns;
 
-            // Define cabeçalhos e chaves para a renderização da tabela (mantido)
             if (collectionName === 'faturamento') {
                 headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
                 dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
@@ -2070,10 +1953,6 @@
             } else if (collectionName === 'despesas') {
                 headers = ["Data", "Tipo", "Descrição", "Pagamento", "Valor (R$)"];
                 dataKeys = ["data", "tipo", "descricao", "pagamento", "valor"];
-                valueColumns = ["valor"];
-            } else if (collectionName === 'prolabore') {
-                headers = ["Data", "Descrição", "Valor Retirado (R$)"];
-                dataKeys = ["data", "descricao", "valor"];
                 valueColumns = ["valor"];
             } else if (collectionName === 'notasemitidas') {
                 headers = ["Emissão", "Nº NF", "Cliente", "Descrição", "Valor (R$)"];
