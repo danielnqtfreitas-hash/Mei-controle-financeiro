@@ -78,6 +78,10 @@
         .file-card {
             background-color: #2a2a2a;
         }
+        /* Estilo para o multiselect (evita quebra de layout em mobile) */
+        .multiselect-compact {
+            max-height: 120px;
+        }
     </style>
 </head>
 <body class="min-h-screen antialiased">
@@ -234,6 +238,10 @@
         setLogLevel('debug'); // Ativa logs do Firestore para ajudar na depuração.
 
         // --- UTILITIES E HELPERS ---
+        
+        // Lista consolidada de opções de pagamento
+        const PAYMENT_OPTIONS = ['Cartão', 'Pix', 'Dinheiro', 'Boleto', 'Transferência', 'Outro'];
+
 
         const getCollectionPath = (collectionName) => {
             return `artifacts/${appId}/public/data/${collectionName}`;
@@ -284,7 +292,7 @@
         };
 
 
-        const filterAndSortData = (data, search, monthYear, dateKey = 'data') => {
+        const filterAndSortData = (data, search, monthYear, selectedPayments, dateKey = 'data') => {
             let filtered = filterDataByMonthYear(data, dateKey, monthYear); 
             
             if (search) {
@@ -295,6 +303,16 @@
                     )
                 );
             }
+            
+            // NOVO FILTRO: Meios de Pagamento
+            if (selectedPayments && selectedPayments.length > 0) {
+                 filtered = filtered.filter(item => {
+                    const paymentMethod = item.pagamento;
+                    // Filtra apenas se o item tiver um método de pagamento que está na lista de selecionados
+                    return paymentMethod && selectedPayments.includes(paymentMethod);
+                });
+            }
+
             filtered.sort((a, b) => new Date(b[dateKey] || 0) - new Date(a[dateKey] || 0));
             return filtered;
         };
@@ -594,7 +612,7 @@
                     <div>
                         <label for="fat-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
                         <select name="pagamento" id="fat-pagamento" class="${getInputClasses()}">
-                            ${['Cartão', 'Pix', 'Dinheiro', 'Boleto', 'Outro'].map(opt => 
+                            ${PAYMENT_OPTIONS.map(opt => 
                                 `<option value="${opt}" ${data.pagamento === opt ? 'selected' : ''}>${opt}</option>`
                             ).join('')}
                         </select>
@@ -649,7 +667,7 @@
                     <div>
                         <label for="des-pagamento" class="block text-sm font-medium text-gray-400 mb-1">Meio de Pagamento</label>
                         <select name="pagamento" id="des-pagamento" class="${getInputClasses()}">
-                            ${['Cartão', 'Pix', 'Dinheiro', 'Boleto', 'Transferência', 'Outro'].map(opt => 
+                             ${PAYMENT_OPTIONS.map(opt => 
                                 `<option value="${opt}" ${data.pagamento === opt ? 'selected' : ''}>${opt}</option>`
                             ).join('')}
                         </select>
@@ -1205,7 +1223,13 @@
                 const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
                 const monthYearFilter = document.getElementById(`${collectionName}-month-year`)?.value;
                 const searchFilter = document.getElementById(`${collectionName}-search`)?.value;
-                const filteredData = filterAndSortData(state[collectionName], searchFilter, monthYearFilter, dateKey);
+                
+                const paymentSelect = document.getElementById(`${collectionName}-payment-filter`);
+                const selectedPayments = paymentSelect 
+                    ? Array.from(paymentSelect.options).filter(option => option.selected).map(option => option.value) 
+                    : [];
+
+                const filteredData = filterAndSortData(state[collectionName], searchFilter, monthYearFilter, selectedPayments, dateKey);
 
                 if (filteredData.length === 0) {
                     showToast("Nenhum dado encontrado para exportar com os filtros atuais.", 'error');
@@ -1219,7 +1243,8 @@
                 pdf.text(`Relatório MEI: ${title}`, 15, 20);
 
                 pdf.setFontSize(10);
-                const filterInfo = `Filtros: Mês/Ano: ${monthYearFilter || 'Todos'} | Busca: ${searchFilter || 'Nenhuma'}`;
+                const paymentInfo = selectedPayments.length > 0 ? `Pagamento: ${selectedPayments.join(', ')} | ` : '';
+                const filterInfo = `Filtros: Mês/Ano: ${monthYearFilter || 'Todos'} | ${paymentInfo} Busca: ${searchFilter || 'Nenhuma'}`;
                 pdf.text(filterInfo, 15, 28);
                 pdf.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, 15, 33);
                 
@@ -1261,24 +1286,43 @@
 
         const renderControls = (collectionName, title) => {
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
+            const showPaymentFilter = collectionName === 'faturamento' || collectionName === 'despesas';
             
+            const paymentFilterHtml = showPaymentFilter ? `
+                <div class="w-full sm:w-auto">
+                    <label for="${collectionName}-payment-filter" class="block text-sm font-medium text-gray-400 mb-1">Filtrar por Pagamento</label>
+                    <select multiple id="${collectionName}-payment-filter" size="4"
+                            class="multiselect-compact w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
+                            onchange="handleSearchFilter('${collectionName}', '${dateKey}')">
+                        ${PAYMENT_OPTIONS.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                    </select>
+                    <button onclick="clearPaymentFilter('${collectionName}')" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Seleção</button>
+                </div>
+            ` : '';
+
+
             return `
-                <div class="flex flex-col sm:flex-row gap-4 mb-6 card p-4 rounded-xl border border-[#333]">
+                <div class="flex flex-wrap gap-4 mb-6 card p-4 rounded-xl border border-[#333]">
                     <!-- Busca Rápida -->
-                    <div class="flex-grow">
+                    <div class="flex-grow w-full md:w-auto min-w-[150px]">
                         <label for="${collectionName}-search" class="block text-sm font-medium text-gray-400 mb-1">Busca Rápida</label>
                         <input type="text" id="${collectionName}-search" placeholder="Buscar por descrição, cliente, etc." 
                                class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
                                oninput="handleSearchFilter('${collectionName}', '${dateKey}')">
                     </div>
+                    
                     <!-- Filtro por Mês/Ano -->
-                    <div class="w-full sm:w-auto">
+                    <div class="w-full sm:w-auto min-w-[150px]">
                         <label for="${collectionName}-month-year" class="block text-sm font-medium text-gray-400 mb-1">Filtrar por Mês/Ano</label>
                         <input type="month" id="${collectionName}-month-year" value=""
                                class="w-full p-2.5 rounded-lg bg-[#2a2a2a] border border-[#444] focus:border-neon-green focus:ring-1 focus:ring-neon-green text-sm"
                                onchange="handleSearchFilter('${collectionName}', '${dateKey}')">
                         <button onclick="clearMonthFilter('${collectionName}')" class="text-xs text-gray-500 mt-1 hover:text-white transition duration-200">Limpar Filtro</button>
                     </div>
+                    
+                    <!-- NOVO: Filtro por Pagamento (Apenas Faturamento/Despesas) -->
+                    ${paymentFilterHtml}
+                    
                     <!-- Botão Exportar PDF -->
                     <div class="w-full sm:w-auto flex items-end">
                         <button id="export-pdf-btn-${collectionName}"
@@ -1292,18 +1336,25 @@
             `;
         };
         
-        const createTableHTML = (collectionName, data, headers, dataKeys, valueColumns = []) => {
+        const createTableHTML = (collectionName, data, headers, dataKeys, valueColumns) => {
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
             
+            // Leitura dos filtros
+            const searchFilter = document.getElementById(`${collectionName}-search`)?.value;
+            const monthYearFilter = document.getElementById(`${collectionName}-month-year`)?.value;
+            
+            const paymentSelect = document.getElementById(`${collectionName}-payment-filter`);
+            const selectedPayments = paymentSelect 
+                ? Array.from(paymentSelect.options).filter(option => option.selected).map(option => option.value) 
+                : [];
+
+
             const filteredData = (collectionName !== 'estoque') ? 
-                filterAndSortData(data, 
-                    document.getElementById(`${collectionName}-search`)?.value,
-                    document.getElementById(`${collectionName}-month-year`)?.value,
-                    dateKey
-                ) : data;
+                filterAndSortData(data, searchFilter, monthYearFilter, selectedPayments, dateKey) 
+                : data;
 
             if (filteredData.length === 0) {
-                return `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum registro encontrado.</div>`;
+                return `<div class="p-6 text-center text-gray-500 card rounded-xl">Nenhum registro encontrado com os filtros aplicados.</div>`;
             }
             
             const addComprovanteColumn = collectionName === 'faturamento' || collectionName === 'despesas';
@@ -1938,6 +1989,7 @@
             window.openEditModal = openEditModal; 
             window.openLinkedComprovante = openLinkedComprovante; 
             window.exportToPDF = exportToPDF; 
+            window.clearPaymentFilter = clearPaymentFilter; // Adiciona função ao escopo global
             
             window.handleDashboardMonthFilter = (value) => {
                 state.dashboardMonthYearFilter = value;
@@ -1958,7 +2010,13 @@
             const data = state[collectionName];
             
             let headers, dataKeys, valueColumns;
-
+            
+            // Leitura dos Pagamentos Selecionados
+            const paymentSelect = document.getElementById(`${collectionName}-payment-filter`);
+            const selectedPayments = paymentSelect 
+                ? Array.from(paymentSelect.options).filter(option => option.selected).map(option => option.value) 
+                : [];
+            
             if (collectionName === 'faturamento') {
                 headers = ["Data", "Cliente", "Descrição", "Pagamento", "Valor (R$)", "Custo (R$)", "Lucro (R$)"];
                 dataKeys = ["data", "cliente", "descricao", "pagamento", "valor", "custo", "lucro"];
@@ -1971,14 +2029,20 @@
                 headers = ["Emissão", "Nº NF", "Cliente", "Descrição", "Valor (R$)"];
                 dataKeys = ["dataEmissao", "numeroNF", "cliente", "descricao", "valor"];
                 valueColumns = ["valor"];
+                // Limpa o filtro de pagamento, pois não é aplicável a NF
+                selectedPayments.length = 0; 
             } else if (collectionName === 'das') {
                 headers = ["Mês de Referência", "Valor DAS (R$)", "Pago em"];
                 dataKeys = ["mesReferencia", "valorDas", "pagoEm"];
                 valueColumns = ["valorDas"];
+                 // Limpa o filtro de pagamento, pois não é aplicável a DAS
+                selectedPayments.length = 0; 
             } else if (collectionName === 'estoque') {
                  headers = ["Item", "Quantidade", "Custo Unitário (R$)", "Total (R$)"];
                  dataKeys = ["item", "quantidade", "custoUnitario", "total"];
                  valueColumns = ["custoUnitario", "total"];
+                 // Limpa o filtro de pagamento, pois não é aplicável a Estoque
+                selectedPayments.length = 0; 
             } else {
                 return;
             }
@@ -1989,6 +2053,15 @@
         const clearMonthFilter = (collectionName) => {
             const monthYearInput = document.getElementById(`${collectionName}-month-year`);
             if (monthYearInput) monthYearInput.value = '';
+            const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
+            handleSearchFilter(collectionName, dateKey);
+        };
+        
+        const clearPaymentFilter = (collectionName) => {
+            const paymentSelect = document.getElementById(`${collectionName}-payment-filter`);
+            if (paymentSelect) {
+                Array.from(paymentSelect.options).forEach(option => option.selected = false);
+            }
             const dateKey = collectionName === 'notasemitidas' ? 'dataEmissao' : (collectionName === 'das' ? 'pagoEm' : 'data');
             handleSearchFilter(collectionName, dateKey);
         };
